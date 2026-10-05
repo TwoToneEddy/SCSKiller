@@ -1,0 +1,27 @@
+name: Linux
+on:
+  push:
+    paths: ['linux/**', '.github/workflows/linux.yml']
+  pull_request:
+    paths: ['linux/**', '.github/workflows/linux.yml']
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Qt dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libxkbcommon0
+          python -m pip install -r linux/requirements.txt
+      - name: Build and test
+        run: ./linux/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scskiller-linux-python-archive
+          path: dist/linux/

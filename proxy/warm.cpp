@@ -34,6 +34,10 @@
 #include <thread>
 #include <vector>
 
+#ifdef __MINGW32__
+#include "directx_uuids.h"
+#endif
+
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "ole32.lib")
 
@@ -47,6 +51,9 @@ struct __declspec(uuid("F158268A-D5A5-45CE-99CF-00D6C3F3FC0A")) IDesktopAppXActi
     virtual HRESULT STDMETHODCALLTYPE ActivateWithOptionsArgsWorkingDirectoryShowWindow(LPCWSTR aumid, LPCWSTR exe, LPCWSTR args,
         DWORD options, DWORD parent_pid, IUnknown*, LPCWSTR dir, DWORD show, HANDLE* process) = 0;
 };
+#ifdef __MINGW32__
+__CRT_UUID_DECL(IDesktopAppXActivator,0xF158268A,0xD5A5,0x45CE,0x99,0xCF,0x00,0xD6,0xC3,0xF3,0xFC,0x0A)
+#endif
 static const CLSID CLSID_DesktopAppXActivator = {0x168EB462, 0x775F, 0x42AE, {0x91, 0x11, 0xD7, 0x14, 0xB2, 0x30, 0x6C, 0x2E}};
 
 static std::wstring beat_name(DWORD parent) { return L"Local\\SCSKiller.Beat." + std::to_wstring(parent); }

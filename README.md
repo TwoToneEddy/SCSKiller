@@ -93,6 +93,17 @@ Measured with SCSKiller's pipeline recorder. Your numbers will vary by game, GPU
   exception is opt-in, per game and confirmed every time: an offline session without EasyAntiCheat for ELDEN RING and
   ARMORED CORE VI, at your own risk.
 
+## Linux (CachyOS / Bazzite)
+
+A native Linux Vulkan edition is available in [`linux/`](linux/README.md), with a Qt GUI matching the Windows layout, Steam discovery, a compile queue, and driver-cache warming from existing Vulkan pipeline recordings.
+
+```bash
+./linux/build.sh
+./linux/run.sh
+```
+
+See the [Linux build, run, and compatibility guide](linux/README.md) for dependencies and limitations. An optional original-core Proton bridge now builds from Linux and exposes DirectX extraction, planning and recorder controls. Extraction and pre-launch compilation are verified for the installed Witcher 3 on CachyOS/NVIDIA. In-game cache reuse remains unverified, and full Windows parity is incomplete. The Windows instructions below apply to the original application.
+
 ## Install
 
 | Requirement | |

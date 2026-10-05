@@ -1,0 +1,106 @@
+{
+  "started": "2026-10-05T20:41:18.424078+00:00",
+  "finished": "2026-10-05T20:43:31.121817+00:00",
+  "game": "steam:292030",
+  "build": "14504303",
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 5090",
+    "driver": "615.71.09",
+    "uuid": "8409250b-92aa-d325-ce15-ba3fe302c462",
+    "type": "PHYSICAL_DEVICE_TYPE_DISCRETE_GPU"
+  },
+  "proton": "/usr/share/steam/compatibilitytools.d/proton-cachyos-slr",
+  "experimentalTemplates": true,
+  "index": {
+    "Game": "steam:292030",
+    "Engine": {
+      "Family": "REDengine 3",
+      "Version": "DX12",
+      "Fork": null,
+      "GraphicsApi": "D3D12",
+      "Encrypted": false,
+      "Unsupported": null,
+      "NoRtPipelines": false
+    },
+    "ContentHash": "6ff636d8ba3f50e2f3fa2babef9af26cc5039631",
+    "Shaders": 24266,
+    "Maps": 42264
+  },
+  "indexSeconds": 2.2596842750003816,
+  "success": true,
+  "gameLaunched": false,
+  "gameCacheReuseVerified": false,
+  "plan": {
+    "Recorded": 0,
+    "Generated": 42350,
+    "SynthesizedTemplates": 12,
+    "RootSignatures": 3,
+    "RootSigRuleVerified": true,
+    "ExactUnits": 0,
+    "InferredUnits": 0,
+    "GuessedUnits": 0,
+    "LayoutCoverage": 0,
+    "D3D11Shaders": 0,
+    "MiddlewareItems": 0,
+    "Uncovered": 0,
+    "RtLibraries": 4076,
+    "RtUncovered": 4076,
+    "StageSets": 42358,
+    "LeftOut": 8,
+    "MiddlewareSharedItems": 0,
+    "RtStateObjects": 0,
+    "RtInline": 0
+  },
+  "passes": [
+    {
+      "number": 1,
+      "wallSeconds": 119.32474839799988,
+      "result": {
+        "GameId": "steam:292030",
+        "Stage": "Done",
+        "Progress": {
+          "Done": 42350,
+          "Total": 42350,
+          "Failed": 0,
+          "PerSecond": 395.31789956197144,
+          "CacheGrowthBytes": 0,
+          "Skipped": 0,
+          "Note": null
+        },
+        "Error": null,
+        "Note": null,
+        "PlanCheck": false
+      },
+      "cacheBytes": 275210233
+    },
+    {
+      "number": 2,
+      "wallSeconds": 5.211298845999863,
+      "result": {
+        "GameId": "steam:292030",
+        "Stage": "Done",
+        "Progress": {
+          "Done": 42350,
+          "Total": 42350,
+          "Failed": 0,
+          "PerSecond": 0,
+          "CacheGrowthBytes": 0,
+          "Skipped": 0,
+          "Note": null
+        },
+        "Error": null,
+        "Note": null,
+        "PlanCheck": false
+      },
+      "cacheBytes": 275210233
+    }
+  ],
+  "testedBinariesSha256": {
+    "dist/linux/engine/SCSKiller.Core.dll": "37b7ee61fcd53f82e3b5be04a2387548323edd661b9b62c7e00a3b761fe698ae",
+    "dist/linux/engine/scskiller-engine.dll": "f4b24f4e14ba7c37410b2d881737ee2c95e4192a7ac167717ab9bdf81ce9edd3",
+    "dist/linux/engine/native/d3d12.dll": "08e7949559c1a126f5d2b0bbf58cf492f951c3149c77a8c47cb92218cfddc15b",
+    "dist/linux/engine/native/scskiller_warm.exe": "4ba32896b85a10dd1872e6cbaf219d9e67caa8aed92235336c43bdba35914728"
+  },
+  "sourceCommit": "230f68e07b7b57d0c4b52ab43a284d0a19689a67",
+  "uncommittedChanges": true
+}

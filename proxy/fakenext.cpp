@@ -7,6 +7,9 @@
 #include <windows.h>
 #define D3D12CreateDevice D3D12CreateDevice_h  // d3d12.h declares it without dllexport
 #include <d3d12.h>
+#ifdef __MINGW32__
+#include "directx_uuids.h"
+#endif
 #undef D3D12CreateDevice
 #include <string>
 #include <vector>

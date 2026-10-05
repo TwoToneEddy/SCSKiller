@@ -50,6 +50,33 @@
 #include <tuple>
 #include <vector>
 
+#ifdef __MINGW32__
+#include "directx_uuids.h"
+#endif
+
+static LUID adapter_luid(ID3D12Device* device) {
+#if defined(__MINGW32__) && !defined(_MSC_VER)
+    LUID luid{}; device->GetAdapterLuid(&luid); return luid;
+#else
+    return device->GetAdapterLuid();
+#endif
+}
+
+static D3D12_CPU_DESCRIPTOR_HANDLE cpu_heap_start(ID3D12DescriptorHeap* heap) {
+#if defined(__MINGW32__) && !defined(_MSC_VER)
+    D3D12_CPU_DESCRIPTOR_HANDLE h{}; heap->GetCPUDescriptorHandleForHeapStart(&h); return h;
+#else
+    return heap->GetCPUDescriptorHandleForHeapStart();
+#endif
+}
+static D3D12_GPU_DESCRIPTOR_HANDLE gpu_heap_start(ID3D12DescriptorHeap* heap) {
+#if defined(__MINGW32__) && !defined(_MSC_VER)
+    D3D12_GPU_DESCRIPTOR_HANDLE h{}; heap->GetGPUDescriptorHandleForHeapStart(&h); return h;
+#else
+    return heap->GetGPUDescriptorHandleForHeapStart();
+#endif
+}
+
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "shell32.lib")
@@ -79,7 +106,7 @@ static HMODULE load_system(const wchar_t* dll) {
 static IDXGIAdapter1* adapter_of(ID3D12Device* dev, DXGI_ADAPTER_DESC1& d) {
     IDXGIFactory4* f;
     IDXGIAdapter1* a;
-    return SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&f))) && SUCCEEDED(f->EnumAdapterByLuid(dev->GetAdapterLuid(), IID_PPV_ARGS(&a))) &&
+    return SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&f))) && SUCCEEDED(f->EnumAdapterByLuid(adapter_luid(dev), IID_PPV_ARGS(&a))) &&
            SUCCEEDED(a->GetDesc1(&d)) ? a : nullptr;
 }
 
@@ -1182,7 +1209,7 @@ static int dxr_child(int proc, unsigned seed, const std::wstring& blobs, const s
     D3D12_DESCRIPTOR_HEAP_DESC hd = {D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE};
     CHECK(SUCCEEDED(dev->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&heap))));
     D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_UAV_DIMENSION_TEXTURE2D};
-    dev->CreateUnorderedAccessView(nullptr, nullptr, &uav, heap->GetCPUDescriptorHandleForHeapStart());  // a null UAV
+    dev->CreateUnorderedAccessView(nullptr, nullptr, &uav, cpu_heap_start(heap));  // a null UAV
     UINT64 fv = 0;
     auto dispatch = [&](ID3D12StateObject* so, const void* rgid, int g) {
         memcpy(tp, rgid, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
@@ -1191,7 +1218,7 @@ static int dxr_child(int proc, unsigned seed, const std::wstring& blobs, const s
             cl->SetDescriptorHeaps(1, &heap);
             cl->SetComputeRootSignature(grs[g]);
             cl->SetComputeRootShaderResourceView(0, 0);
-            cl->SetComputeRootDescriptorTable(1, heap->GetGPUDescriptorHandleForHeapStart());
+            cl->SetComputeRootDescriptorTable(1, gpu_heap_start(heap));
             if (g) cl->SetComputeRoot32BitConstant(2, 0, 0);
             cl->SetPipelineState1(so);
             D3D12_DISPATCH_RAYS_DESC dr = {};

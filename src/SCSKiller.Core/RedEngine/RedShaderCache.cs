@@ -4,7 +4,8 @@ using System.IO.Compression;
 namespace SCSKiller.Core.RedEngine;
 
 /// <summary>REDengine 3's shader caches (The Witcher 3's DX12 build, content\content0), laid out as the game's own loader
-/// reads them. Both end in "RDHS" and version 5.
+/// reads them. Both end in "RDHS" and version 3 or 5. Version 3 uses filenames without
+/// the "_0" suffix and omits the two short lists between the material techniques and footer.
 ///   - shaderdx12_0.cache, the material shaders: from offset 0, per shader u64 key, u8 1 (zlib), u32 inflated size, u32
 ///     stored size, the zlib stream (inflated: u32 container size, u32, the DXBC container, the engine's reflection); then
 ///     the techniques (<see cref="ReadTechnique"/>), each naming the shaders of one pipeline by key. Footer, 48 bytes: u32
@@ -16,7 +17,7 @@ namespace SCSKiller.Core.RedEngine;
 /// A damaged file reads as null: every count is bounded by the bytes it needs, every length by the bytes left.</summary>
 public static class RedShaderCache
 {
-    const uint Magic = 0x53484452, Version = 5; // "RDHS"
+    const uint Magic = 0x53484452; // "RDHS"; DX12 cache versions 3 and 5
 
     /// <summary>About 4x The Witcher 3's: 44,828 material shaders, 438,220 techniques, 940 engine shaders, 75 KB at most
     /// inflated per shader.</summary>
@@ -36,8 +37,8 @@ public static class RedShaderCache
     public readonly record struct Footer(uint Shaders, uint Techniques, long At, long Size);
 
     /// <summary>The material cache's footer, when its counts and offsets fit the file and the caps and the techniques are
-    /// followed by exactly the two short lists the game writes before the footer (u32 n1, u32 n2, (n1 + n2) x 12 bytes:
-    /// 8 + 4 in The Witcher 3's, 1 + 4 in its .cachecutted); else null.</summary>
+    /// followed by exactly the two short lists version 5 writes before the footer (u32 n1, u32 n2, (n1 + n2) x 12 bytes:
+    /// 8 + 4 in The Witcher 3's, 1 + 4 in its .cachecutted), or directly by the footer in version 3; else null.</summary>
     public static Footer? ReadFooter(Stream f)
     {
         var len = f.Length;
@@ -45,10 +46,16 @@ public static class RedShaderCache
         var foot = new byte[48];
         f.Position = len - 48;
         f.ReadExactly(foot);
-        if (U32(foot, 40) != Magic || U32(foot, 44) != Version) return null;
+        var version = U32(foot, 44);
+        if (U32(foot, 40) != Magic || version is not (3 or 5)) return null;
         var (shaders, techniques, at, size) = (U32(foot, 0), U32(foot, 4), U64(foot, 16), U64(foot, 24));
-        if (shaders is 0 or > MaxShaders || techniques is 0 or > MaxTechniques || at > (ulong)len - 56 || size > (ulong)len - 56 - at
+        var end = (ulong)len - (version == 3 ? 48UL : 56UL);
+        if (shaders is 0 or > MaxShaders || techniques is 0 or > MaxTechniques || at > end || size > end - at
             || (ulong)shaders * ShaderHeader > at || (ulong)techniques * MinTechnique > size) return null;
+        // Version 3 has the same shader and technique records, with no lists
+        // between the techniques and footer. Require the exact boundary.
+        if (version == 3) return at + size == (ulong)len - 48
+            ? new Footer(shaders, techniques, (long)at, (long)size) : null;
         var lists = new byte[8];
         f.Position = (long)(at + size);
         f.ReadExactly(lists);
@@ -150,7 +157,7 @@ public static class RedShaderCache
         var foot = new byte[28];
         f.Position = len - 28;
         f.ReadExactly(foot);
-        if (U32(foot, 20) != Magic || U32(foot, 24) != Version) return null;
+        if (U32(foot, 20) != Magic || U32(foot, 24) is not (3 or 5)) return null;
         var n = U32(foot, 0);
         if (n > MaxStatic || n * 28L > len) return null;
         var r = new BinaryReader(f);

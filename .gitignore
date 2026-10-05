@@ -25,3 +25,6 @@ build/private-words.txt
 
 # tools/measure.ps1 downloads PresentMon here
 tools/.bin/
+
+# Linux Python environment
+linux/.venv/

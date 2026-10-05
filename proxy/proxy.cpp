@@ -55,6 +55,10 @@
 #include <unordered_set>
 #include <vector>
 
+#ifdef __MINGW32__
+#include "directx_uuids.h"
+#endif
+
 #pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "dxguid.lib")  // CLSID_D3D12DeviceFactory, CLSID_D3D12SDKConfiguration
 #pragma comment(lib, "shell32.lib")  // SHGetKnownFolderPath (delay-loaded: only at the first device)
@@ -84,6 +88,17 @@ static size_t shader_len(const D3D12_SHADER_BYTECODE& b) {
     uint32_t n;
     if (b.BytecodeLength >= 28 && !memcmp(p, "DXBC", 4) && (memcpy(&n, p + 24, 4), n <= b.BytecodeLength)) return n;
     return b.BytecodeLength;
+}
+
+// MinGW declares struct-return COM methods with their explicit MS ABI out parameter.
+static LUID adapter_luid(ID3D12Device* device) {
+#if defined(__MINGW32__) && !defined(_MSC_VER)
+    LUID luid{};
+    device->GetAdapterLuid(&luid);
+    return luid;
+#else
+    return device->GetAdapterLuid();
+#endif
 }
 
 static HMODULE g_real;
@@ -1583,7 +1598,7 @@ static void worker11(Worker11& w, std::atomic<size_t>& next, size_t n, bool debu
     const size_t batch = 16;
     SetThreadPriority(GetCurrentThread(), g_prio);
     w.busy = now_ms();
-    Dev11* d = warm11_open(g_warm_dev->GetAdapterLuid(), debug);
+    Dev11* d = warm11_open(adapter_luid(g_warm_dev), debug);
     w.busy = 0;
     if (!d) { g_warm_faults = 3; w.finished = true; return; }
     for (size_t j; g_warm_faults < 3;) {
@@ -1620,7 +1635,7 @@ static void worker11(Worker11& w, std::atomic<size_t>& next, size_t n, bool debu
             w.tally["batch failed: device lost"] += w.end - j - other;
             w.j = w.end = w.at = 0, w.claimed = false, w.busy = now_ms();  // no batch: a hang in here abandons nothing twice
             warm11_close(d);
-            d = warm11_open(g_warm_dev->GetAdapterLuid(), debug);
+            d = warm11_open(adapter_luid(g_warm_dev), debug);
             w.busy = 0;
             if (w.claimed) return;
             if (!d) { g_warm_faults = 3; w.finished = true; return; }

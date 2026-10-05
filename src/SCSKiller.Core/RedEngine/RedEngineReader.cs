@@ -23,6 +23,10 @@ public sealed class RedEngineReader : IEngineReader
     /// when it has one (<see cref="RedRayTracing"/>).</summary>
     public const string HitGroups = "hitgroups";
     const string Materials = @"content\content0\shaderdx12_0.cache", Static = @"content\content0\staticshaderDx12_0.cache";
+    static string MaterialPath(Game game) => Path.Combine(game.InstallDir,
+        File.Exists(Path.Combine(game.InstallDir, Materials)) ? Materials : @"content\content0\shaderdx12.cache");
+    static string StaticPath(Game game) => Path.Combine(game.InstallDir,
+        File.Exists(Path.Combine(game.InstallDir, Materials)) ? Static : @"content\content0\staticshaderDx12.cache");
 
     /// <summary>Techniques whose shaders Detect inflates, at most, to find one usable pipeline.</summary>
     const int DetectTechniques = 64;
@@ -37,7 +41,7 @@ public sealed class RedEngineReader : IEngineReader
     /// is a pipeline <see cref="Graphics"/> takes.</summary>
     public EngineInfo? Detect(Game game)
     {
-        var path = Path.Combine(game.InstallDir, Materials);
+        var path = MaterialPath(game);
         if (!File.Exists(path)) return null;
         using var f = Open(path);
         if (RedShaderCache.ReadMaterials(f) is not { } m) return null;
@@ -81,12 +85,12 @@ public sealed class RedEngineReader : IEngineReader
         }
         string PlatformOf(string sha) => platformOf.GetValueOrDefault(sha, CarvedReader.Platform);
 
-        var path = Path.Combine(game.InstallDir, Materials);
+        var path = MaterialPath(game);
         RedShaderCache.Materials? m;
         using (var f = Open(path)) m = RedShaderCache.ReadMaterials(f, ct);
-        if (m == null) throw new InvalidDataException($"{Materials} no longer reads as a version 5 shader cache: scan the game again");
+        if (m == null) throw new InvalidDataException($"{path} no longer reads as a supported DX12 shader cache: scan the game again");
 
-        var staticPath = Path.Combine(game.InstallDir, Static);
+        var staticPath = StaticPath(game);
         var engineShaders = 0;
         if (File.Exists(staticPath))
         {
