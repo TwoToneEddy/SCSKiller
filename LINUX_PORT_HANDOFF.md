@@ -115,6 +115,15 @@ Regular app data uses `~/.local/share/scskiller/` and settings use `~/.config/sc
 
 ### 1. Prove the performance value — next milestone
 
+**Next real step, in this order:**
+
+1. **Capture the game's real environment.** Launch Witcher 3 normally through Steam and save its environment, e.g. `cat /proc/$(pgrep -f witcher3.exe | head -1)/environ | tr '\0' '\n' > witcher-env.txt`. This needs the user's desktop session and Steam.
+2. **Match the helper to it.** Give `witcher-env.txt` to the agent, which updates the helper to use the same variables.
+3. **The actual test.** Start with an empty game cache and precompile. Then launch the game and check whether the cache grows and whether the stutters go away in a fixed scene, compared with a run without precompiling.
+
+Skipping straight to step 3 with the current code gives a quick first answer, but a cache miss then wouldn't show whether the approach fails or the environments just differed. Step 1 takes a couple of minutes, so do it first.
+
+- [ ] **Do this before measuring cache hits:** make the helper's Proton environment match the game's own Steam launch. The helper currently sets no `SteamAppId`/`SteamGameId` and sets `PROTONFIXES_DISABLE=1` (`linux/scskiller_linux/engine.py`), so per-game Proton/protonfixes settings (for example `VKD3D_CONFIG` flags) that apply to the game do not apply to the helper. vkd3d-proton can then produce different SPIR-V or pipeline state, and the game misses the cache regardless of the plan. Capture the game's real launch environment (e.g. `/proc/<pid>/environ` of a running game, or `PROTON_LOG=1`), apply the vkd3d/driver-relevant variables to the helper, and record them in the verifier report.
 - [ ] Verify the actual Witcher DX12 game uses the same Proton, GPU, native driver-cache path and compatible translation-layer cache as the successful helper. Check executable/profile/configuration identity, not just directory names.
 - [ ] Measure game cache hits or pipeline compilation events in a reproducible scene with and without generated precompilation. Preserve existing caches/saves/settings; use dedicated test caches where practical.
 - [ ] Compare repeatable gameplay frame times/compilation stalls. The game lacks a test harness in this port; a gameplay segment may require the user's participation.
