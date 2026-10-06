@@ -9,7 +9,9 @@ from PySide6.QtWidgets import (QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabe
     QFormLayout, QSpinBox, QCheckBox, QComboBox, QMessageBox, QInputDialog,
     QPushButton, QProgressBar, QFileDialog, QLineEdit)
 
-from .engine import EngineClient, unix_path
+from . import backend as b
+from . import launch_profile as lp
+from .engine import EngineClient, unix_path, proton_for_game, runtime_fingerprint
 from .gui import label, button
 
 
@@ -63,11 +65,29 @@ class EngineDialog(QDialog):
         self.client = None
         self.tasks = []
         self.states, self.queue, self.preferences = {}, {}, {}
+        self.game = games[0] if len(games) == 1 else None
+        self.exe_names = None
+        self.polling = False
+        self.observed_pid = None
+        self.verified = None
+        self.restart_after_exit = False
         outer = QVBoxLayout(self)
         outer.addWidget(label('Game shaders', 'heading'))
-        outer.addWidget(label('Original SCSKiller extraction, planning and compilation through Proton. Experimental: in-game cache reuse remains unverified.', 'muted'))
+        outer.addWidget(label('Original SCSKiller extraction, planning and compilation through Proton. Compiles into the caches the game’s normal Steam launch opens. Experimental: reuse of generated pipelines by the game remains unverified.', 'muted'))
         self.status = label('Starting the original engine…')
         outer.addWidget(self.status)
+        launch = QHBoxLayout()
+        self.launch_status = label('')
+        self.launch_status.setWordWrap(True)
+        launch.addWidget(self.launch_status, 1)
+        self.detect_button = button('Detect from Steam launch', self.detect_launch)
+        launch.addWidget(self.detect_button)
+        self.templates = QCheckBox('Experimental generated pipelines')
+        self.templates.setToolTip('Generate DirectX pipelines from installed game files when no recording exists. Restarts the engine.')
+        self.templates.setChecked(bool(self.config.get('experimental_templates')))
+        self.templates.toggled.connect(self.toggle_templates)
+        launch.addWidget(self.templates)
+        outer.addLayout(launch)
         self.tabs = QTabWidget()
         outer.addWidget(self.tabs, 1)
         self.make_library()
@@ -79,7 +99,12 @@ class EngineDialog(QDialog):
         self.log.setMaximumBlockCount(3000)
         self.tabs.addTab(self.log, 'Log')
         self.packet.connect(self.on_packet)
+        self.update_profile()
         QTimer.singleShot(0, self.connect_engine)
+        if self.game and lp.appid(self.game):
+            self.poller = QTimer(self)
+            self.poller.timeout.connect(self.poll_game)
+            self.poller.start(3000)
 
     def task(self, action, done=None):
         task = Task(action)
@@ -99,11 +124,115 @@ class EngineDialog(QDialog):
         self.status.setText(message)
         self.log.appendPlainText('Error: ' + message)
 
+    def identities(self):
+        runtime = proton_for_game(self.game, self.config)
+        device = self.devices[int(self.config.get('device', 0))]
+        return runtime, runtime_fingerprint(runtime), b.fingerprint(device)
+
+    def update_profile(self):
+        """Load this game's observed Steam launch settings, or explain how to get them."""
+        self.profile, self.profile_problems = None, []
+        self.config.pop('launch_profile', None)
+        if not self.game or not lp.appid(self.game):
+            self.launch_status.setText('Non-Steam game: compiled caches use the configured cache directory.')
+            self.detect_button.hide()
+            return
+        try:
+            _, runtime_print, driver_print = self.identities()
+        except (ValueError, IndexError) as error:
+            self.profile_problems = [str(error)]
+            self.launch_status.setText('Launch settings unavailable: ' + str(error))
+            return
+        profile = lp.load(self.game)
+        self.profile_problems = lp.staleness(self.game, profile, runtime_print, driver_print)
+        if self.profile_problems:
+            self.launch_status.setText(' '.join(self.profile_problems) + ' Click “Detect from Steam launch”: the game starts normally '
+                                       'through Steam; quit it once it reaches the main menu. No launch options are needed.')
+            return
+        self.profile = profile
+        self.config['launch_profile'] = profile
+        route = lp.routing(profile)
+        self.launch_status.setText(f'Steam launch settings detected {profile["capturedAt"][:16].replace("T", " ")} UTC · '
+                                   f'NVIDIA cache: {route["nvidiaPath"] or "driver default"} · vkd3d: {route["vkd3dArchive"] or "disabled"}')
+
     def connect_engine(self):
         def connect():
             self.client = self.client_factory(self.games, self.devices, self.config, self.packet.emit)
             return self.client.ready.result(timeout=60)
         self.task(connect, lambda _: self.call('scan', done=self.scanned))
+
+    def restart_engine(self):
+        """Settings that shape the helper's native environment need a new session."""
+        old, self.client = self.client, None
+        self.status.setText('Restarting the original engine…')
+        def restart():
+            if old:
+                old.close()
+            self.client = self.client_factory(self.games, self.devices, self.config, self.packet.emit)
+            return self.client.ready.result(timeout=60)
+        self.task(restart, lambda _: self.call('scan', done=self.scanned))
+
+    def toggle_templates(self, enabled):
+        self.config['experimental_templates'] = enabled
+        self.restart_engine()
+
+    def detect_launch(self):
+        if not self.game:
+            return
+        self.restart_after_exit = True
+        self.launch_status.setText('Starting the game through Steam… Leave this window open. Quit the game once it reaches the main menu.')
+        QDesktopServices.openUrl(QUrl('steam://rungameid/' + lp.appid(self.game)))
+
+    def poll_game(self):
+        """Observe the game's normal Steam launch; never changes the game."""
+        if self.polling:
+            return
+        self.polling = True
+        game = self.game
+        def look():
+            if self.exe_names is None:
+                self.exe_names = lp._executables(game)
+            return lp.game_processes(game, self.exe_names)
+        task = self.task(look, self.observed)
+        task.finished.connect(lambda: setattr(self, 'polling', False))
+
+    def observed(self, processes):
+        if not processes:
+            if self.observed_pid is not None:
+                self.observed_pid = None
+                if self.restart_after_exit:
+                    self.restart_after_exit = False
+                    self.update_profile()
+                    self.restart_engine()
+            return
+        process = processes[0]
+        first = self.observed_pid != process['pid']
+        self.observed_pid = process['pid']
+        try:
+            runtime, runtime_print, driver_print = self.identities()
+            observed = lp.build_profile(self.game, process, runtime, runtime_print, driver_print)
+        except (lp.ProfileError, ValueError, OSError) as error:
+            self.launch_status.setText('Could not use the running game’s launch settings: ' + str(error))
+            return
+        saved = self.profile
+        changed = not saved or any(saved.get(k) != observed.get(k) for k in ('environment', 'workingDirectory', 'exe'))
+        if changed or not saved.get('vkd3dMapped') and observed['vkd3dMapped']:
+            lp.save(self.game, observed)
+            if changed:
+                self.restart_after_exit = True
+                self.launch_status.setText('Launch settings detected from the running game. Quit the game; '
+                                           'SCSKiller then restarts its engine with these settings and you can Compile.')
+                if saved:
+                    self.log.appendPlainText('The game’s launch settings changed since the last compile. Compile again.')
+                return
+        if observed['vkd3dMapped'] and (first or observed['vkd3dMapped'] != self.verified):
+            self.verified = observed['vkd3dMapped']
+            checks = lp.verify_launch(saved or observed, process)
+            ok = all(c['ok'] for c in checks)
+            for check in checks:
+                self.log.appendPlainText(f'{"OK " if check["ok"] else "MISMATCH "}{check["check"]}: expected {check["expected"]}, observed {check["observed"]}')
+            self.status.setText('Running game uses the caches SCSKiller compiles into.' if ok else
+                                'The running game is not using the expected caches; see Log. Quit it and click “Detect from Steam launch”.')
 
     def call(self, method, done=None, **params):
         if self.client is None:
@@ -119,7 +248,7 @@ class EngineDialog(QDialog):
         actions.addWidget(button('Extract shaders', lambda: self.selected_call('index', self.show_result)))
         actions.addWidget(button('Build plan', lambda: self.selected_call('plan', self.show_result)))
         actions.addWidget(button('Add to queue', lambda: self.selected_call('queue.add', self.queue_result)))
-        actions.addWidget(button('Compile', lambda: self.selected_call('compile', self.queue_result), True))
+        actions.addWidget(button('Compile', self.compile, True))
         actions.addWidget(button('Play', self.play))
         layout.addLayout(actions)
         self.table = QTableWidget(0, 5)
@@ -274,6 +403,56 @@ class EngineDialog(QDialog):
             self.chart.peaks = (state.get('LastFrames') or {}).get('Peaks', [])
             self.chart.update()
 
+    def compile(self):
+        key = self.selected_id()
+        if not key or self.client is None:
+            self.error('The original engine is not connected')
+            return
+        if self.game and lp.appid(self.game) and not self.profile:
+            if QMessageBox.question(self, 'Detect launch settings first',
+                    'SCSKiller needs to see how Steam normally starts this game so it can compile into the same caches. '
+                    'Start the game through Steam now? Quit it once it reaches the main menu, then click Compile again.'
+                    + ('\n\n' + ' '.join(self.profile_problems) if self.profile_problems else '')) == QMessageBox.Yes:
+                self.detect_launch()
+            return
+        client = self.client
+        self.status.setText('Compiling…')
+        self.tabs.setCurrentIndex(1)
+        def run():
+            queue = client.request('compile', timeout=24 * 3600, game=key)
+            item = next((q for q in queue if q['GameId'] == key), None)
+            published = client.publish_caches() if hasattr(client, 'publish_caches') else None
+            return queue, item, published
+        self.task(run, self.compiled)
+
+    def compiled(self, result):
+        queue, item, published = result
+        self.queue_result(queue)
+        progress = (item or {}).get('Progress') or {}
+        if not item or item.get('Stage') != 'Done':
+            message = (item or {}).get('Error') or (item or {}).get('Note') or 'Compilation did not finish'
+            QMessageBox.warning(self, 'Compilation failed', f'{message}\n\nSee the Log tab and {getattr(self.client, "data", "")}/helper.log.')
+            self.status.setText('Compilation failed: ' + message)
+            return
+        if not progress.get('Total'):
+            QMessageBox.warning(self, 'Nothing to compile', 'The plan contains no pipelines for this game. Without a recording, '
+                                'enable “Experimental generated pipelines” at the top of this window and Compile again.')
+            self.status.setText('Nothing was compiled')
+            return
+        lines = [f'Compiled {progress.get("Done", 0)} of {progress["Total"]} pipelines; {progress.get("Failed", 0)} failed, '
+                 f'{progress.get("Skipped", 0)} skipped.']
+        if published:
+            vkd3d = published.get('vkd3d')
+            if vkd3d:
+                lines.append(f'vkd3d-proton archive {vkd3d["archive"]}: {vkd3d["added"]} entries added, {vkd3d.get("existing", 0)} kept.')
+            nvidia = published.get('nvidia')
+            if nvidia:
+                lines.append(f'NVIDIA cache {nvidia["path"]} ({nvidia["appName"]}): {nvidia["bytes"] / 1e6:.1f} MB.')
+            lines.append('Launch the game normally from Steam. Leave this window open to confirm the game opens these caches.')
+        self.log.appendPlainText('\n'.join(lines))
+        self.status.setText(lines[0] + ' Ready to play through Steam.')
+        QMessageBox.information(self, 'Shaders compiled', '\n\n'.join(lines))
+
     def queue_result(self, result):
         if isinstance(result, list):
             self.queue = {item['GameId']: item for item in result}
@@ -346,6 +525,8 @@ class EngineDialog(QDialog):
                 Path(path).write_text(json.dumps(state, indent=2) + '\n')
 
     def closeEvent(self, event):
+        if hasattr(self, 'poller'):
+            self.poller.stop()
         if self.client:
             self.client.close()
         for task in list(self.tasks):

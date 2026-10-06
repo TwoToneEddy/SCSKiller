@@ -513,6 +513,10 @@ class Window(QMainWindow):
             config['use_game_prefix'] = True
         dialog = EngineDialog([game], self.devices, config, self)
         dialog.exec()
+        if dialog.config.get('experimental_templates', False) != self.config.get('experimental_templates', False):
+            self.config['experimental_templates'] = dialog.config['experimental_templates']
+            self.experimental_templates.setChecked(self.config['experimental_templates'])
+            b.write_json(b.CONFIG / 'settings.json', self.config)
 
     def add_game(self):
         if self.running:

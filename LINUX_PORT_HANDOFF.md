@@ -1,6 +1,6 @@
 # Linux port: current state and resumption guide
 
-Updated: 2026-10-05. Branch: `linux_port`. Workspace used for validation: `/home/lee/SCSKiller`.
+Updated: 2026-10-06. Branch: `linux_port`. Workspace used for validation: `/home/lee/SCSKiller`.
 
 ## Objective and current stopping point
 
@@ -9,6 +9,20 @@ The original request was full Windows parity on CachyOS/Bazzite with a similar G
 **Extraction and pre-launch GPU compilation now work for the installed Witcher 3 DX12 build on CachyOS/NVIDIA. Actual game cache reuse and reduced stutter are not yet verified.** This is a native Linux frontend with the original engine running through Proton, not a fully native Linux rewrite of the C#/DirectX backend. Full Windows parity remains incomplete.
 
 The user requested this branch and commit as a resumable checkpoint. The old sandbox restriction is gone: Proton executes successfully with the current permissions. Do not repeat the earlier claim that sandbox restrictions block testing. No sudo was needed for the successful verification.
+
+## NEXT STEP (start here)
+
+The GUI precompile → normal Steam launch workflow is implemented (section 1). What remains, in order:
+
+1. **User test of the normal launch — needs the user at the machine.**
+   - Clear Witcher 3's Steam Launch Options. They still contain the old `out/witcher3-game-test/launch.sh precompiled %command%` test wrapper, which redirects every cache.
+   - Run `./linux/run.sh`, select Witcher, open **Game shaders…**, then **Compile** (experimental generated pipelines are enabled in `~/.config/scskiller/settings.json`).
+   - With the dialog still open, click **Play**, reach the main menu and quit.
+   - Pass: the Log tab shows `OK` for the NVIDIA cache directory, the NVIDIA application name and the mapped vkd3d archive (`The Witcher 3/bin/vkd3d-proton.cache`). If the live launch settings differ from the saved profile, the dialog asks you to Compile again; do so and repeat.
+   - Record the result in a new `linux/validation/` note.
+2. **Measure entry reuse after that launch.** Count how many of the game's newly written `bin/vkd3d-proton.cache.write` entries already exist in the merged `.cache` (hash comparison as in section 1). The expected result today is ~0 hits.
+3. **Make generated pipelines match the game (the real blocker to any benefit).** Hashes from the previous gameplay test overlapped 0/610 with the generated set, while the game's own hashes are stable between runs. Investigate the synthesized root signatures and PSO templates (`Planning/Planner.cs`, `Planning/RootSig.cs`), using the game's own vkd3d archive entries or a recording as ground truth. Re-measure overlap after each change.
+4. Only then compare stutter/frame times on a workload that has baseline compilation stalls.
 
 ## What was actually verified
 
@@ -113,7 +127,7 @@ Regular app data uses `~/.local/share/scskiller/` and settings use `~/.config/sc
 
 ## Remaining work, in priority order
 
-### 1. NEXT STEP: GUI precompilation followed by normal Steam launch — no custom launch parameters
+### 1. GUI precompilation followed by normal Steam launch — implemented; live-launch verification pending
 
 **This is the immediate implementation priority, before broader parity or more gameplay benchmarks.** The user must be able to select Witcher 3 in the GUI, compile its shaders, close the tool and launch the game normally through Steam. No helper commands, environment-file handoff, wrapper script or custom Steam Launch Options may be required from the user.
 
@@ -131,6 +145,16 @@ Acceptance for this immediate step: the entire workflow is GUI compile → ordin
 **Current evidence (2026-10-06):** the normal DX12 game's environment was captured in `out/witcher3-game-test/normal-game-environment.json`; its d3d12/d3d12core/dxgi hashes match CachyOS Proton and its NVIDIA driver is 615.71.09. `verify-engine.py --game-environment` replays an explicit graphics allowlist and records applied flags; Steam IDs are now supplied by the helper. Protonfixes remains disabled in the helper, with captured supported graphics flags applied directly. All 28 Python tests pass. Fresh compilation produced 42,350 pipelines with zero failures/skips under `out/witcher3-game-test/precompiled`.
 
 The manual-wrapper gameplay comparison confirmed both requested isolated cache paths and the game's mapping of the generated vkd3d archive. Promotion from `.write` to `.cache` preserved its SHA-256. **This verifies routing/opening, not individual generated-entry hits.** Both gameplay runs were smooth; durations differed (121.89/91.81 seconds), and similar amounts of new NVIDIA/vkd3d cache data were written. No performance benefit is established. See [gameplay validation](linux/validation/2026-10-06-witcher3-game.md). Raw local evidence includes `report.json`, `native-environment.json`, per-phase game environments and before/after cache hashes. The GUI does not yet automate this matching.
+
+**Implementation status (2026-10-06, evening):** steps 1–3 are implemented; step 4 still needs a normal game launch.
+
+- `linux/scskiller_linux/launch_profile.py` observes the running game started by Steam (environment allowlist, `/proc/<pid>/cwd`, mapped vkd3d archive, translation DLL hashes, NVIDIA driver version), saves a per-game profile and marks it stale after game/Proton/driver changes.
+- `EngineClient` with `launch_profile` points the native NVIDIA/Mesa cache at the game's Steam cache with its application name, stages vkd3d-proton output, and `publish_caches()` merges it into the archive the game opens. The default case is `<cwd>/vkd3d-proton.cache`; Witcher's is `The Witcher 3/bin/vkd3d-proton.cache`. The archive format is a 0x30-byte header (`VKS`, vendor/device ID, UUID) plus `{u64 hash, u64 checksum, u32 size, u32 type, payload}` entries. The merge keeps existing `.cache`/`.cache.write` entries, writes one `.cache` and backs up the originals. `routing.json` records the result.
+- The bridge (`Program.cs` `HostGame.CacheEnvironment`) previously overrode `VKD3D_SHADER_CACHE_PATH` for the warmer child with the Steam shadercache directory, which the game never opens. The host now supplies the exact cache environment.
+- GUI: Game shaders has **Detect from Steam launch** (opens `steam://rungameid`, polls `/proc`), an experimental-pipelines checkbox (restarts the helper), and Compile → publish with an explicit summary or actionable failure. While open it verifies a running game's cache paths, app name and mapped archive in the Log tab.
+- Real run (headless, same code path): 42,350/42,350 compiled into `shadercache/292030/nvidiav1` (second pass 8 s, reusing that cache); 42,350 vkd3d entries merged with the game's 610 existing entries into `bin/vkd3d-proton.cache`. That profile was built from the earlier normal capture (`normal-game-environment.json`). A live detection replaces it the next time the game runs with the dialog open.
+- **Reuse warning:** in the earlier gameplay test, **none** of the game's 610 vkd3d pipeline hashes matched any of the 42,350 generated hashes. The game's own hashes were stable across runs (600/610 identical). The planner logs `root sigs rebuilt from shader counts … 12 synthesized templates, 3 root signatures`. Generated root signatures and render-state templates therefore do not match the game's real PSOs. Routing is fixed, but until that changes the precompile gives no benefit. Next investigation: derive the real root signatures and PSO templates (from a recording, or from the game's own vkd3d archive entries) and re-measure hash overlap.
+- Witcher's Steam Launch Options still contained the old `out/witcher3-game-test/launch.sh precompiled %command%` wrapper at this point. It must be cleared for normal-launch verification.
 
 After the immediate workflow is implemented:
 

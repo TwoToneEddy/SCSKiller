@@ -18,6 +18,7 @@ import threading
 import time
 
 from . import backend as b
+from . import launch_profile as lp
 
 
 def windows_path(path):
@@ -129,6 +130,13 @@ def manifest(games, devices, config, data, runtime):
     return result
 
 
+# Cache variables the helper's warmer child receives; the bridge otherwise
+# derives them from CacheDir.
+CACHE_ENV_KEYS = ('__GL_SHADER_DISK_CACHE', '__GL_SHADER_DISK_CACHE_PATH', '__GL_SHADER_DISK_CACHE_APP_NAME',
+                  '__GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME', '__GL_SHADER_DISK_CACHE_SKIP_CLEANUP',
+                  'MESA_SHADER_CACHE_DIR', 'MESA_SHADER_CACHE_DISABLE', 'VKD3D_SHADER_CACHE_PATH', 'DXVK_STATE_CACHE_PATH')
+
+
 class EngineError(RuntimeError):
     pass
 
@@ -197,7 +205,6 @@ class EngineClient:
                     # The caller may override the conservative check only by closing the active Windows apps.
                     raise EngineError('Close running Windows games/applications before opening a recorder session')
             self.prefix.mkdir(parents=True, exist_ok=True)
-            b.write_json(data_root / 'manifest.json', manifest(games, devices, config, data_root, self.runtime))
             b.write_json(data_root / 'running.json', running_executables())
             steam = b.steam_roots()
             if not steam:
@@ -225,11 +232,38 @@ class EngineClient:
                 for key in GRAPHICS_ENV_KEYS:
                     self.environment.pop(key, None)
                 self.environment.update(self.graphics_environment)
+            self.game = games[0]
+            self.profile = config.get('launch_profile')
+            self.routing = None
+            if self.profile:
+                if config.get('game_environment'):
+                    raise EngineError('Use either a saved launch profile or an explicit environment capture')
+                # Write the caches the game's normal Steam launch opens.
+                self.staging = data_root / 'vkd3d-staging'
+                self.staging.mkdir(parents=True, exist_ok=True)
+                for stale in self.staging.glob('*'):
+                    stale.unlink()
+                for key in GRAPHICS_ENV_KEYS | lp.CAPTURED_KEYS:
+                    if key not in ('WINEDLLOVERRIDES', 'STEAM_COMPAT_TOOL_PATHS'):
+                        self.environment.pop(key, None)
+                self.environment.update(lp.helper_environment(self.profile, windows_path(self.staging)))
+                self.graphics_environment = {k: v for k, v in self.environment.items() if k in GRAPHICS_ENV_KEYS}
+                self.routing = lp.routing(self.profile)
+                if self.routing['nvidiaPath']:
+                    Path(self.routing['nvidiaPath']).mkdir(parents=True, exist_ok=True)
+            host_manifest = manifest(games, devices, config, data_root, self.runtime)
+            if self.routing:
+                host_manifest['Games'][0]['CacheEnvironment'] = {k: self.environment[k] for k in CACHE_ENV_KEYS
+                                                                 if k in self.environment}
+            b.write_json(data_root / 'manifest.json', host_manifest)
             if games[0].id.startswith('steam:'):
                 app = games[0].id.split(':', 1)[1]
                 self.environment.update(SteamAppId=app, SteamGameId=app, STEAM_COMPAT_APP_ID=app)
             b.write_json(data_root / 'graphics-environment.json', {
-                'capture': config.get('game_environment'),
+                'capture': config.get('game_environment'), 'launchProfile': bool(self.profile),
+                'routing': self.routing,
+                'helper': {k: self.environment.get(k) for k in ('__GL_SHADER_DISK_CACHE_PATH',
+                    '__GL_SHADER_DISK_CACHE_APP_NAME', 'MESA_SHADER_CACHE_DIR', 'VKD3D_SHADER_CACHE_PATH')},
                 'applied': {k: self.environment[k] for k in sorted(GRAPHICS_ENV_KEYS) if k in self.environment},
                 'cache': str(cache), 'protonfixesDisabled': True,
                 'note': 'Captured graphics flags are replayed directly; game prefix and container loader settings are not copied.'})
@@ -257,6 +291,24 @@ class EngineClient:
         except BaseException:
             self.close()
             raise
+
+    def publish_caches(self):
+        """Move staged vkd3d-proton output into the archive the game opens."""
+        if not self.routing:
+            return None
+        if lp.game_processes(self.game):
+            raise EngineError('Close the game before SCSKiller updates its shader cache')
+        result = {'time': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'routing': self.routing}
+        if self.routing['vkd3dArchive']:
+            result['vkd3d'] = lp.merge_vkd3d(self.staging, self.routing['vkd3dArchive'],
+                                             self.data / 'backups' / self.game.id.replace(':', '_'))
+        nvidia = self.routing['nvidiaPath']
+        if nvidia:
+            files = [p for p in Path(nvidia).rglob('*') if p.is_file()]
+            result['nvidia'] = {'path': nvidia, 'appName': self.routing['nvidiaAppName'],
+                                'files': len(files), 'bytes': sum(p.stat().st_size for p in files)}
+        b.write_json(self.data / 'routing.json', result)
+        return result
 
     def _watch(self):
         while not self.closed.wait(2):
@@ -351,6 +403,13 @@ class EngineClient:
             for stream in (self.process.stdin, self.process.stdout):
                 if stream:
                     stream.close()
+        if getattr(self, 'routing', None) and any(self.staging.glob('vkd3d-proton*')):
+            # Output from queue runs not followed by an explicit publish.
+            try:
+                self.publish_caches()
+            except (OSError, RuntimeError) as error:
+                if hasattr(self, 'stderr'):
+                    self.stderr.write(f'Shader cache was not published: {error}\n')
         if hasattr(self, 'stderr'):
             self.stderr.close()
         if hasattr(self, 'guard'):

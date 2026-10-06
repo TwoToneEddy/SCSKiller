@@ -35,7 +35,17 @@ python3 linux/build-engine.py --bootstrap
 
 The helper is written to `dist/linux/engine/` next to the GUI launcher. You can set `SCSKILLER_DOTNET` to the SDK executable, `SCSKILLER_LLVM` to an existing LLVM-MinGW directory, and `SCSKILLER_DX_HEADERS` to the pinned DirectX-Headers checkout. With packages already restored, use `--no-restore` for a rebuild. `build-info.json` records the toolchain/source identity.
 
-Select a game and click **Game shaders…**. Each engine session handles one game, so the native driver receives that game’s cache environment before Proton starts. The app uses Steam’s recorded Proton path; if it cannot determine that path, select the game’s Proton directory in Settings. It uses a private helper prefix by default. The CLI also supports:
+Select a game and click **Game shaders…**. Each engine session handles one game, so the native driver receives that game’s cache environment before Proton starts.
+
+### Precompiling Steam games for a normal launch
+
+No Steam Launch Options are needed (leave the field empty). The first time, click **Detect from Steam launch** in Game shaders: the game starts normally through Steam, SCSKiller reads its cache configuration from the running process (`/proc` environment, working directory and mapped files), and you quit at the main menu. The profile is saved to `~/.local/share/scskiller/launch-profiles/` and must be re-detected after a game, Proton or GPU driver update (the dialog says so). Then click **Compile**:
+
+- NVIDIA/Mesa driver caches are written directly to the game’s Steam cache directory (for example `steamapps/shadercache/<appid>/nvidiav1`) with the same cache application name (`steamapp_shader_cache`).
+- vkd3d-proton output is staged, then merged into the archive the game opens: `<working directory>/vkd3d-proton.cache` by default, or `vkd3d-proton.<exe>.cache` in an explicit `VKD3D_SHADER_CACHE_PATH`. Existing entries are kept and the originals are backed up under `~/.local/share/scskiller/engine/backups/`.
+- The resolved destinations are recorded in `~/.local/share/scskiller/engine/routing.json`.
+
+Keep the dialog open and click **Play** (or launch from Steam): the Log tab reports whether the running game uses the same NVIDIA cache directory/application name and maps the merged vkd3d archive. Opening the right caches does not prove that generated pipelines are reused; see the handoff document. The app uses Steam’s recorded Proton path; if it cannot determine that path, select the game’s Proton directory in Settings. It uses a private helper prefix by default. The CLI also supports:
 
 ```bash
 ./linux/run.sh engine scan steam:292030

@@ -207,7 +207,9 @@ static IReadOnlySet<string> ReadRunning(string file)
 }
 
 sealed class Sink<T>(Action<T> action) : IProgress<T> { public void Report(T value) => action(value); }
-sealed record HostGame(string Id, string Name, string InstallDir, string? ExePath, string? Version, string CacheDir);
+// CacheEnvironment, when supplied, is the exact cache routing of the game's normal launch.
+sealed record HostGame(string Id, string Name, string InstallDir, string? ExePath, string? Version, string CacheDir,
+    Dictionary<string, string>? CacheEnvironment = null);
 sealed record HostConfig(string DataDirectory, string RunningFile, string Driver, int Threads, bool ExperimentalTemplates, HostGame[] Games, string? GpuName = null, bool GamePrefixInUse = false);
 sealed class HostSource(HostConfig config) : IGameSource
 {
@@ -232,7 +234,9 @@ sealed class HostWarmer(ProtonVendor vendor, HostConfig config, IProgress<string
     {
         var entry = config.Games.FirstOrDefault(g => g.Id == game.Id);
         var env = new Dictionary<string, string>();
-        if (entry != null)
+        if (entry?.CacheEnvironment != null)
+            foreach (var (key, value) in entry.CacheEnvironment) env[key] = value;
+        else if (entry != null)
         {
             Directory.CreateDirectory(entry.CacheDir + "/nvidiav1");
             // Wine passes these through to the native Vulkan driver as Unix paths.
