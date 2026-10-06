@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-06",
+  "game": "steam:292030",
+  "build": "14504303",
+  "baseline": {
+    "log": "out/witcher3-game-test/baseline/logs/witcher3_2026-10-06_19-11-42.csv",
+    "frames": 14611,
+    "elapsedSeconds": 121.890446127,
+    "meanFrameMs": 8.342818617479981,
+    "medianFrameMs": 8.33441,
+    "p99FrameMs": 10.0046,
+    "maxFrameMs": 42.2015,
+    "framesOver33ms": 1,
+    "framesOver50ms": 0,
+    "framesOver100ms": 0,
+    "note": "Single route sample; frametime spikes are not attributed to shader compilation."
+  },
+  "precompiled": {
+    "log": "out/witcher3-game-test/precompiled/logs/witcher3_2026-10-06_19-17-57.csv",
+    "frames": 11006,
+    "elapsedSeconds": 91.80752648,
+    "meanFrameMs": 8.342245792295111,
+    "medianFrameMs": 8.33741,
+    "p99FrameMs": 10.3973,
+    "maxFrameMs": 37.2928,
+    "framesOver33ms": 1,
+    "framesOver50ms": 0,
+    "framesOver100ms": 0,
+    "note": "Single route sample; frametime spikes are not attributed to shader compilation."
+  },
+  "pathsVerified": true,
+  "gameMappedPrecompiledVkd3dCache": true,
+  "generatedCachePromotedUnchanged": true,
+  "generatedVkd3dCacheSha256": "fa7ea3faf9bea164f91819bd1c800f63b4d2a5a5902b2b6926e5395827b2b7e4",
+  "individualCacheHitsVerified": false,
+  "performanceBenefitEstablished": false,
+  "baselineVkd3dNewBytes": 152784,
+  "precompiledVkd3dNewBytes": 147856,
+  "baselineNvidiaNewBinBytes": 12486141,
+  "precompiledNvidiaNewBinBytes": 12328390
+}

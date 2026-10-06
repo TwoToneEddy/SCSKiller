@@ -46,9 +46,11 @@ Select a game and click **Game shaders…**. Each engine session handles one gam
 
 Generated templates require the experimental Settings switch (or `--experimental-templates`). Windows driver measurements have not been established for Proton, so generated-template capability is off by default. Compilation success would still need evidence that the actual game reuses the resulting driver cache.
 
+The GUI starts the helper automatically; no separate helper terminal is needed. Ordinary Steam/Fossilize replay needs no custom game launch options. The fully matched generated-pipeline Witcher test described below still uses a captured game environment and a Steam launch wrapper: the GUI does not yet capture/apply those settings or configure the game's vkd3d cache path automatically. Do not assume a normal GUI compile reproduces that validated setup. Remove the test wrapper from Steam Launch Options when returning to normal play; that also stops routing the game to the isolated test cache.
+
 Recorder operations require **Recorder session…** in game details, an existing Steam-created prefix, and closed Windows applications. They use that prefix so the original authorization ledger and per-executable DLL override are visible to the game. Installation backs up the previous override for removal. Automatic recorder installation remains disabled. These controls have not been tested against a running game; do not interpret their presence as verified compatibility.
 
-Helper diagnostics are in `$XDG_DATA_HOME/scskiller/engine/helper.log` (normally `~/.local/share/scskiller/engine/helper.log`). The earlier sandbox restriction has been removed. The bridge now supports the installed Witcher 3’s version-3 cache format, as well as version 5. Bazzite, AMD, Flatpak runtime compatibility, in-game cache reuse, and a before/after game benchmark remain unverified.
+Helper diagnostics are in `$XDG_DATA_HOME/scskiller/engine/helper.log` (normally `~/.local/share/scskiller/engine/helper.log`). The earlier sandbox restriction has been removed. The bridge now supports the installed Witcher 3’s version-3 cache format, as well as version 5. Witcher gameplay cache routing/opening was verified with the explicit test setup; generated-entry hits and performance benefit remain unverified. Bazzite, AMD and Flatpak runtime compatibility remain unverified.
 
 ## Fresh CachyOS installation
 
@@ -195,4 +197,8 @@ python3 linux/verify-engine.py steam:292030 \
 
 The script selects the game’s recorded Proton runtime before redirecting all compiler output to its isolated cache. It writes `report.json`, `events.jsonl`, helper logs, and generated pipeline data beneath that directory. Use `--device` to select another enumerated GPU and `--proton` only to explicitly override the runtime. The output directory must not already exist. This runs real GPU compilation, not a simulated test.
 
-See [the validation report](validation/2026-10-05-witcher3.md) for fixes, evidence and limits. Automated checks now include 26 Python tests and 8 parser tests covering both REDengine cache versions and malformed inputs.
+For a gameplay comparison, first capture the normally launched game's graphics environment. Pass the capture as `--game-environment path/to/capture.json`; its format is `{"environment":{"SteamAppId":"292030","SteamGameId":"292030",...}}`. The helper checks the game IDs and replays an explicit list of graphics flags, including vkd3d/DXVK options and NVIDIA's shader-cache application name. It keeps its private prefix and dedicated cache paths; Steam-container loader paths and the game's DLL overrides are not imported. Missing captured graphics flags are cleared from the helper environment. Protonfixes remains disabled because the captured graphics flags are applied directly. `host/graphics-environment.json` and `report.json` record what was applied. Matching these flags does not establish game-side cache reuse or identical behavior across the Steam container and host.
+
+See [the validation report](validation/2026-10-05-witcher3.md) for fixes, evidence and limits. Automated checks now include 28 Python tests and 8 parser tests covering both REDengine cache versions and malformed inputs.
+
+The [2026-10-06 gameplay follow-up](validation/2026-10-06-witcher3-game.md) verified that the Steam-launched game opens the generated vkd3d cache and uses the intended NVIDIA cache directory/application name. Both recorded runs were smooth. Individual generated-entry hits and a performance benefit remain unverified.

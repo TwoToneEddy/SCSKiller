@@ -83,6 +83,29 @@ class EngineTests(unittest.TestCase):
             client.request('fail', timeout=5)
         self.assertEqual(client.request('echo', timeout=5)['method'], 'echo')
 
+    def test_capture_matches_flags_without_importing_game_prefix_or_container_paths(self):
+        capture = self.root / 'capture.json'
+        capture.write_text(json.dumps({'environment': {'SteamAppId':'12', 'SteamGameId':'12',
+            'VKD3D_CONFIG':'no_upload_hvv', '__GL_SHADER_DISK_CACHE_APP_NAME':'steamapp_shader_cache',
+            'WINEPREFIX':'/game/prefix', 'VK_DRIVER_FILES':'/container/only.json',
+            '__GL_SHADER_DISK_CACHE_PATH':'/game/cache'}}))
+        self.config['game_environment'] = str(capture)
+        with patch.dict(e.os.environ, {'VKD3D_SHADER_MODEL':'6_0'}):
+            client = self.client()
+        self.assertEqual(self.environment['VKD3D_CONFIG'], 'no_upload_hvv')
+        self.assertEqual(self.environment['__GL_SHADER_DISK_CACHE_APP_NAME'], 'steamapp_shader_cache')
+        self.assertEqual(self.environment['__GL_SHADER_DISK_CACHE_PATH'], str(self.game.cache / 'nvidiav1'))
+        self.assertNotIn('VKD3D_SHADER_MODEL', self.environment)
+        self.assertNotEqual(self.environment.get('WINEPREFIX'), '/game/prefix')
+        self.assertNotEqual(self.environment.get('VK_DRIVER_FILES'), '/container/only.json')
+        self.assertEqual(json.loads((client.data / 'graphics-environment.json').read_text())['applied']['SteamAppId'], '12')
+
+    def test_capture_rejects_other_game(self):
+        capture = self.root / 'capture.json'
+        capture.write_text(json.dumps({'environment':{'SteamAppId':'99','SteamGameId':'99'}}))
+        with self.assertRaisesRegex(e.EngineError, 'different Steam game'):
+            e.captured_graphics_environment(capture, self.game)
+
     def test_process_exit_fails_pending_request(self):
         client = self.client()
         with self.assertRaisesRegex(e.EngineError, r'exited \(7\)'):

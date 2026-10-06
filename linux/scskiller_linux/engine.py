@@ -133,6 +133,29 @@ class EngineError(RuntimeError):
     pass
 
 
+# Replay graphics options, not a game's prefix, loader paths, overlays or
+# pressure-vessel-only ICD paths. Cache locations are supplied by this session.
+GRAPHICS_ENV_KEYS = frozenset(('SteamAppId', 'SteamGameId', 'STEAM_COMPAT_APP_ID',
+    'VKD3D_CONFIG', 'VKD3D_FEATURE_LEVEL', 'VKD3D_SHADER_MODEL', 'VKD3D_FILTER_DEVICE_NAME',
+    'VKD3D_DISABLE_EXTENSIONS', 'DXVK_CONFIG', 'DXVK_ENABLE_NVAPI', 'DXVK_FILTER_DEVICE_NAME',
+    'DXVK_NVAPI_DRS_SETTINGS', 'DXVK_NVAPI_SET_NGX_DEBUG_OPTIONS',
+    'PROTON_DLSS_UPGRADE', 'PROTON_FSR4_UPGRADE', 'PROTON_DLSS_INDICATOR',
+    '__GL_SHADER_DISK_CACHE_APP_NAME', '__GL_SHADER_DISK_CACHE_READ_ONLY_APP_NAME',
+    '__GL_SHADER_DISK_CACHE_SKIP_CLEANUP', '__GLVND_DISALLOW_PATCHING',
+    'MESA_DISK_CACHE_SINGLE_FILE', 'MESA_SHADER_CACHE_MAX_SIZE', 'MESA_GLSL_CACHE_MAX_SIZE'))
+
+
+def captured_graphics_environment(path, game):
+    record = json.loads(Path(path).expanduser().read_text())
+    env = record.get('environment')
+    if not isinstance(env, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+        raise EngineError('Environment capture must contain a string environment dictionary')
+    app = game.id.removeprefix('steam:')
+    if not game.id.startswith('steam:') or env.get('SteamAppId') != app or env.get('SteamGameId') != app:
+        raise EngineError('Environment capture belongs to a different Steam game')
+    return {k: v for k, v in env.items() if k in GRAPHICS_ENV_KEYS}
+
+
 class EngineClient:
     def __init__(self, games, devices, config, emit=lambda _: None, process_factory=subprocess.Popen):
         if len(games) != 1:
@@ -194,6 +217,22 @@ class EngineClient:
                 'MESA_SHADER_CACHE_DIR': str(cache), 'MESA_SHADER_CACHE_DISABLE': 'false',
                 'VKD3D_SHADER_CACHE_PATH': windows_path(cache),
                 'DXVK_STATE_CACHE_PATH': windows_path(cache)})
+            self.graphics_environment = {}
+            if config.get('game_environment'):
+                self.graphics_environment = captured_graphics_environment(config['game_environment'], games[0])
+                # Missing flags in the captured game must not leak in from the
+                # terminal launching this helper.
+                for key in GRAPHICS_ENV_KEYS:
+                    self.environment.pop(key, None)
+                self.environment.update(self.graphics_environment)
+            if games[0].id.startswith('steam:'):
+                app = games[0].id.split(':', 1)[1]
+                self.environment.update(SteamAppId=app, SteamGameId=app, STEAM_COMPAT_APP_ID=app)
+            b.write_json(data_root / 'graphics-environment.json', {
+                'capture': config.get('game_environment'),
+                'applied': {k: self.environment[k] for k in sorted(GRAPHICS_ENV_KEYS) if k in self.environment},
+                'cache': str(cache), 'protonfixesDisabled': True,
+                'note': 'Captured graphics flags are replayed directly; game prefix and container loader settings are not copied.'})
             command = [str(self.runtime / 'proton'), 'runinprefix', str(executable / 'scskiller-engine.exe'),
                        windows_path(data_root / 'manifest.json')]
             self.stderr = (data_root / 'helper.log').open('a')

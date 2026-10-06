@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--threads', type=int, default=4)
     parser.add_argument('--proton', help='explicit Proton directory; otherwise uses Steam recorded runtime')
     parser.add_argument('--passes', type=int, choices=[1, 2], default=2)
+    parser.add_argument('--game-environment', type=Path, help='JSON environment capture from this running Steam game')
     args = parser.parse_args()
     if args.threads < 1:
         parser.error('--threads must be positive')
@@ -33,6 +34,8 @@ def main():
                             'engine_data':str(root / 'host'), 'use_game_prefix':False}
     # Verification uses the selected game's recorded runtime unless explicitly overridden.
     config['proton'] = args.proton or ''
+    if args.game_environment:
+        config['game_environment'] = str(args.game_environment.expanduser().absolute())
     devices = b.gpu_info()
     if not 0 <= args.device < len(devices):
         parser.error('Selected Vulkan GPU is unavailable')
@@ -60,6 +63,7 @@ def main():
                 last_print[0] = time.monotonic()
         try:
             client = EngineClient([isolated], devices, config, event)
+            report['graphicsEnvironment'] = json.loads((client.data / 'graphics-environment.json').read_text())
             ready = client.ready.result(120)
             prefs = ready['Settings'] | {'UseCommunityDb':False, 'ShareRecordings':False,
                                         'Threads':args.threads, 'MaxCompileMemoryGB':8}
