@@ -12,6 +12,8 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
     QSpinBox, QComboBox, QCheckBox, QFormLayout, QMessageBox, QProgressBar, QDialog, QDialogButtonBox)
 
 from . import backend as b
+from . import caches
+from . import launch_profile as lp
 
 STYLE = '''
 QWidget { background: #272727; color: #f3f3f3; font-size: 13px; }
@@ -567,6 +569,33 @@ class Window(QMainWindow):
         text.setPlainText(f'{game.status}\n{game.reason}\n\nInstall: {game.install}\nCache: {game.cache}\n'
                           f'Shaders: {game.shaders:,}\nPipelines: {game.pipelines:,}\n\nRecordings:\n' + '\n'.join(map(str, game.archives)))
         layout.addWidget(text)
+        caches_text = QPlainTextEdit()
+        caches_text.setReadOnly(True)
+        caches_text.setMaximumHeight(140)
+        layout.addWidget(caches_text)
+
+        def show_caches():
+            report = caches.report(game, lp.load(game))
+            limit = lambda v: 'unlimited' if v is None else 'driver default' if v == 'default' else b.human_bytes(v)
+            lines = [f'{p["name"]}: {b.human_bytes(p["bytes"])}{" — " + p["note"] if p["note"] else ""}' for p in report['parts']]
+            lines.append(f'Limits: NVIDIA {limit(report["limits"]["nvidia"])}, Mesa {limit(report["limits"]["mesa"])}'
+                         + ('' if report['profile'] else ' (Steam defaults; launch the game once to observe its settings)'))
+            caches_text.setPlainText('\n'.join(lines + report['warnings']) if report['parts'] else 'No compiled caches yet.')
+
+        def clear_caches():
+            if QMessageBox.question(dialog, 'Clear compiled caches?', f'Delete {game.name}’s compiled driver, vkd3d-proton and DXVK caches? '
+                                    'Steam’s pipeline recordings are kept. The game recompiles shaders as it meets them, or compile again here.') != QMessageBox.Yes:
+                return
+            try:
+                freed = caches.clear(game, lp.load(game))
+                QMessageBox.information(dialog, 'Caches cleared', f'Freed {b.human_bytes(freed)}.')
+            except (OSError, caches.CacheError) as error:
+                QMessageBox.warning(dialog, 'Caches not cleared', str(error))
+            show_caches()
+            self.refresh()
+
+        show_caches()
+        layout.addWidget(button('Clear compiled caches…', clear_caches))
         layout.addWidget(button('Game shaders — original engine', lambda: (dialog.accept(), self.open_engine(game=game))))
         layout.addWidget(button('Recorder session…', lambda: (dialog.accept(), self.open_engine(game=game, recorder=True))))
         layout.addWidget(button('Open game folder', lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(game.install)))))

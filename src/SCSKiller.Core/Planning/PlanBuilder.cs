@@ -348,6 +348,16 @@ sealed class PlanBuilder
 
     void Count(string k) => stats[k] = stats.GetValueOrDefault(k) + 1;
 
+    /// <summary>Stage sets left out, by reason and stages ("no_rs: Vertex+Geometry"): what a recording must cover to
+    /// close the gap.</summary>
+    readonly SortedDictionary<string, int> leftOutSets = new(StringComparer.Ordinal);
+    void LeftOut(string why, SortedDictionary<int, string> stages)
+    {
+        Count(why);
+        var key = $"{why}: {string.Join('+', stages.Keys.Select(k => (Stage)k))}";
+        leftOutSets[key] = leftOutSets.GetValueOrDefault(key) + 1;
+    }
+
     /// <summary>One stage set as whole-pipeline PSOs: a recorded template of its shape with the shaders swapped (every GS
     /// template of the GS's input topology), else a synthesized one.</summary>
     void Emit(SortedDictionary<int, string> stages, string shape, string psOut)
@@ -360,8 +370,8 @@ sealed class PlanBuilder
         // the ones not matching fail harmlessly at replay), else a synthesized one
         var cands = gs != null ? gsTopo.Where(t => (topo == 0 || t.Key.Topology == topo) && t.Key.Shape == shape).Select(t => t.Value).ToList() is { Count: > 0 } l ? l : null
             : templates.GetValueOrDefault($"{shape}|{psOut}") ?? templates.GetValueOrDefault(shape);
-        if (rs == null || (cands == null && (!synth || topo == 0))) { Count(rs == null ? "no_rs" : gs != null ? "no_gs_template" : "no_template"); return; }
-        if (!Covers(rs, stages)) { Count("rs_uncovered"); return; }
+        if (rs == null || (cands == null && (!synth || topo == 0))) { LeftOut(rs == null ? "no_rs" : gs != null ? "no_gs_template" : "no_template", stages); return; }
+        if (!Covers(rs, stages)) { LeftOut("rs_uncovered", stages); return; }
         if (have.Contains(Tuple(rs, stages))) { Count("already_recorded"); return; }
         usedRs.Add(rs);
         Count("generated");
@@ -413,8 +423,8 @@ sealed class PlanBuilder
         {
             if (!seen.Add(Tuple("", stages))) return; // shaders shared across maps
             var rs = RootSigOf(stages);
-            if (rs == null) { Count("no_rs"); return; }
-            if (!Covers(rs, stages)) { Count("rs_uncovered"); return; }
+            if (rs == null) { LeftOut("no_rs", stages); return; }
+            if (!Covers(rs, stages)) { LeftOut("rs_uncovered", stages); return; }
             if (rsBlobs.TryGetValue(rs, out var blob)) facts.AddRootSignature(rs, blob); // VS units share PIXEL-only differences
             var l = stages.TryGetValue((int)Stage.Vertex, out var vs) ? layouts.TryGetValue(vs, out var r) ? r : layouts[vs] = facts.Layouts(bc[vs]) : none;
             var s = stages.TryGetValue((int)Stage.Pixel, out var ps) ? shapes.TryGetValue(ps, out var q) ? q : shapes[ps] = facts.Shapes(bc[ps]) : new([], Provenance.Exact);
@@ -533,7 +543,10 @@ sealed class PlanBuilder
                 foreach (var d in ds) st[(int)d.Stage] = d.Sha1;
                 if (st.Count > 0 && Planner.Positioned(st.ToDictionary(x => (Stage)x.Key, x => bc[x.Value]))) sink(st, Planner.Shape(st), PsOut(st));
                 else if (st.Count > 0 && seen.Add(Tuple("", st)))   // a stage set like any other, counted once
-                    Count(RootSigOf(st) is { } rs && have.Contains(Tuple(rs, st)) ? "already_recorded" : "stream_output");
+                {
+                    if (RootSigOf(st) is { } rs && have.Contains(Tuple(rs, st))) Count("already_recorded");
+                    else LeftOut("stream_output", st);
+                }
                 continue;
             }
             var srcs = new Dictionary<string, List<ShaderInfo>>();
@@ -967,6 +980,8 @@ sealed class PlanBuilder
             + (packEntries.Count > 0 ? $", {packEntries.Count} middleware pack PSOs ({packNew} not in the recording)" : "")
             + (n11 > 0 ? $" ({string.Join(", ", d3d11.GroupBy(h => bc[h].Stage).Select(g => $"{g.Count()} {g.Key}").Append(tess11.Count > 0 ? $"{tess11.Count} HS+DS" : "").Where(s => s != ""))})" : "")
             + $", {new FileInfo(plan.FilePath).Length / 1024} KiB -> {plan.FilePath}");
+        if (leftOutSets.Count > 0)
+            log?.Report($"left out by stage set: {string.Join(", ", leftOutSets.Select(e => $"{e.Key} x{e.Value}"))}");
         if (unserializable != null)   // the stage sets within no_rs
             log?.Report($"warning: {stats.GetValueOrDefault("rs_unserializable")} stage sets and {stats.GetValueOrDefault("rt_unserializable")} DXIL libraries left out: "
                 + $"the runtime won't serialize the root signature the rule builds for them ({unserializable})");

@@ -171,7 +171,9 @@ The launcher requires Python 3.10+ and PySide6 6.8+ at runtime. The `.pyz` bundl
 | Windows engine readers and DirectX pipeline synthesis | Witcher 3 extraction and 42,350 generated pipeline compiles verified on CachyOS/NVIDIA; other paths unverified |
 | Windows DLL recorder and frame-time analysis | Cross-built recorder, prefix controls and frame chart implemented; runtime unverified |
 | Automatic Epic/EA/GOG/Ubisoft/Xbox discovery | Not ported; manual recordings can be added |
-| Windows GPU cache controls and scheduled tasks | Not applicable; no Linux equivalent implemented |
+| Per-game cache report and clearing | Implemented (game details and `caches <id> [--clear]`): NVIDIA, Mesa, vkd3d-proton and DXVK caches with sizes and effective driver limits; Steam recordings and shared caches are never cleared. Runtime unverified |
+| Global driver cache-size setting | Not applicable: Linux drivers take per-launch environment variables, which Steam sets; limits are reported, not changed |
+| Scheduled tasks | Not implemented |
 | Community account/sharing | Original services exposed through bridge; runtime unverified |
 | Automatic app updates | Not implemented |
 

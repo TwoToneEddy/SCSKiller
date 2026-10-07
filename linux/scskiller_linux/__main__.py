@@ -15,6 +15,9 @@ def main():
     engine_parser.add_argument('operation', choices=['scan', 'index', 'plan', 'compile'])
     engine_parser.add_argument('game', help='exact installed game ID')
     engine_parser.add_argument('--experimental-templates', action='store_true')
+    caches_parser = sub.add_parser('caches', help='report or clear one game’s compiled driver caches')
+    caches_parser.add_argument('game')
+    caches_parser.add_argument('--clear', action='store_true', help='delete them (Steam recordings are kept)')
     compile_parser = sub.add_parser('compile', help='replay one game by exact ID')
     compile_parser.add_argument('game')
     compile_parser.add_argument('--threads', type=int)
@@ -34,11 +37,22 @@ def main():
     if args.command == 'scan':
         print(json.dumps({'games': [asdict(g) for g in games], 'warnings': warnings}, default=str, indent=2))
         return 0
-    if not driver:
+    if not driver and args.command != 'caches':
         parser.error('No selected Vulkan device. Install vulkan-tools and check the GPU driver.')
     game = next((g for g in games if g.id == args.game), None)
     if game is None:
         parser.error('Game ID not found; use scan to list IDs.')
+    if args.command == 'caches':
+        from . import caches, launch_profile as lp
+        profile = lp.load(game)
+        try:
+            if args.clear:
+                print(f'Freed {b.human_bytes(caches.clear(game, profile))}')
+            print(json.dumps(caches.report(game, profile), indent=2))
+            return 0
+        except (OSError, caches.CacheError) as error:
+            print(str(error))
+            return 1
     if args.command == 'engine':
         from .engine import EngineClient
         config['experimental_templates'] = args.experimental_templates or config.get('experimental_templates', False)

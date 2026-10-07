@@ -224,7 +224,22 @@ sealed class ProtonVendor(GpuInfo gpu, bool experimentalTemplates) : IGpuVendorB
     // Do not reuse nvidia-1/amd-1 measurements made on Windows drivers.
     public VendorCaps Caps { get; } = new(experimentalTemplates ? "proton-experimental-templates-1" : "proton-recorded-1",
         CacheKeyedByExeName: true, StateIndependentCache: experimentalTemplates, CacheSizeConfigurable: false);
-    public CacheUsage GetCacheUsage() => new("", 0, true);
+    /// <summary>The cache directories of the game being compiled, as Windows paths; set by HostWarmer before each run.</summary>
+    public volatile string[] CacheDirs = [];
+    // Measured, not pre-sized: NVIDIA's Linux and Mesa caches and vkd3d-proton's archives grow as entries are written.
+    public CacheUsage GetCacheUsage()
+    {
+        var dirs = CacheDirs;
+        long bytes = 0;
+        foreach (var dir in dirs)
+            try
+            {
+                if (Directory.Exists(dir))
+                    bytes += new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => { try { return f.Length; } catch (IOException) { return 0L; } });
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }   // a file vanished mid-scan: next sample
+        return new(string.Join(";", dirs), bytes, false);
+    }
     public CacheLimit? GetCacheLimit() => null;
     public void SetCacheLimit(CacheLimit limit) => throw new NotSupportedException("Linux cache settings are managed by the host");
 }
@@ -248,6 +263,13 @@ sealed class HostWarmer(ProtonVendor vendor, HostConfig config, IProgress<string
             env["VKD3D_SHADER_CACHE_PATH"] = entry.CacheDir;
             env["DXVK_STATE_CACHE_PATH"] = entry.CacheDir;
         }
+        // The cache paths the warmer child's driver writes, measured for progress
+        string Win(string p) => p.StartsWith('/') ? "Z:" + p.Replace('/', '\\') : p;
+        var dirs = new[] { "__GL_SHADER_DISK_CACHE_PATH", "MESA_SHADER_CACHE_DIR", "VKD3D_SHADER_CACHE_PATH" }
+            .Select(k => env.GetValueOrDefault(k)).Where(p => !string.IsNullOrEmpty(p) && p != "0")
+            .Select(p => Win(p!).TrimEnd('\\') + "\\").Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        // nested (the fallback's nvidiav1 is inside the Mesa directory): counted once
+        vendor.CacheDirs = dirs.Where(d => !dirs.Any(o => o != d && d.StartsWith(o, StringComparison.OrdinalIgnoreCase))).ToArray();
         return new Warmer(vendor, Path.Combine(AppContext.BaseDirectory, "native", "scskiller_warm.exe"))
             { Environment = env, Log = log }.Start(game, workDir, options, progress);
     }
