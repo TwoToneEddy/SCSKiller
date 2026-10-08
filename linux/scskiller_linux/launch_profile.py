@@ -191,6 +191,12 @@ def routing(profile):
         vkd3d = directory / f'vkd3d-proton.{profile["exe"]}.cache'
     elif explicit == '0':
         vkd3d = None
+    elif profile.get('vkd3dMapped'):
+        # The archive the game actually mapped. Witcher 3 starts in bin/x64_dx12
+        # but opens bin/vkd3d-proton.cache, so a sampled working directory can
+        # point at a file the game never reads.
+        mapped = Path(profile['vkd3dMapped'][0])
+        vkd3d = mapped.with_name(mapped.name.removesuffix('.write'))
     else:
         # Without a path, vkd3d-proton uses the process working directory.
         vkd3d = Path(profile['workingDirectory']) / 'vkd3d-proton.cache'

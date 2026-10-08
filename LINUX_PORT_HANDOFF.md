@@ -12,17 +12,10 @@ The user requested this branch and commit as a resumable checkpoint. The old san
 
 ## NEXT STEP (start here)
 
-The GUI precompile → normal Steam launch workflow is implemented (section 1). What remains, in order:
+The GUI precompile → normal Steam launch workflow passed on 2026-10-08 ([note](linux/validation/2026-10-08-witcher3-normal-launch.md)): all three cache-routing checks were OK, and Steam Launch Options are empty. Entry reuse was measured: **0** of the game's 657 own pipelines and 0 of 28 new ones appear in the 42,350 generated entries.
 
-1. **User test of the normal launch — needs the user at the machine.**
-   - Clear Witcher 3's Steam Launch Options. They still contain the old `out/witcher3-game-test/launch.sh precompiled %command%` test wrapper, which redirects every cache.
-   - Run `./linux/run.sh`, select Witcher, open **Game shaders…**, then **Compile** (experimental generated pipelines are enabled in `~/.config/scskiller/settings.json`).
-   - With the dialog still open, click **Play**, reach the main menu and quit.
-   - Pass: the Log tab shows `OK` for the NVIDIA cache directory, the NVIDIA application name and the mapped vkd3d archive (`The Witcher 3/bin/vkd3d-proton.cache`). If the live launch settings differ from the saved profile, the dialog asks you to Compile again; do so and repeat.
-   - Record the result in a new `linux/validation/` note.
-2. **Measure entry reuse after that launch.** Count how many of the game's newly written `bin/vkd3d-proton.cache.write` entries already exist in the merged `.cache` (hash comparison as in section 1). The expected result today is ~0 hits.
-3. **Make generated pipelines match the game (the real blocker to any benefit).** Hashes from the previous gameplay test overlapped 0/610 with the generated set, while the game's own hashes are stable between runs. Investigate the synthesized root signatures and PSO templates (`Planning/Planner.cs`, `Planning/RootSig.cs`), using the game's own vkd3d archive entries or a recording as ground truth. Re-measure overlap after each change.
-4. Only then compare stutter/frame times on a workload that has baseline compilation stalls.
+1. **Make generated pipelines match the game (the real blocker to any benefit).** Investigate the synthesized root signatures and PSO templates (`Planning/Planner.cs`, `Planning/RootSig.cs`), using the game's own entries in `bin/vkd3d-proton.cache` (hashes not in the generated set) or a recording as ground truth. Re-measure overlap after each change: count `.cache.write` entries already in `.cache` after a short session.
+2. Only then compare stutter/frame times on a workload that has baseline compilation stalls.
 
 ## What was actually verified
 

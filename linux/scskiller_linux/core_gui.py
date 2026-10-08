@@ -215,7 +215,10 @@ class EngineDialog(QDialog):
             self.launch_status.setText('Could not use the running game’s launch settings: ' + str(error))
             return
         saved = self.profile
-        changed = not saved or any(saved.get(k) != observed.get(k) for k in ('environment', 'workingDirectory', 'exe'))
+        # Compare destinations, not the working directory: it can change while
+        # the game runs even though the mapped archive stays the same.
+        changed = not saved or any(saved.get(k) != observed.get(k) for k in ('environment', 'exe')) \
+            or (observed['vkd3dMapped'] and lp.routing(saved) != lp.routing(observed))
         if changed or not saved.get('vkd3dMapped') and observed['vkd3dMapped']:
             lp.save(self.game, observed)
             if changed:
@@ -340,6 +343,7 @@ class EngineDialog(QDialog):
         event, data = packet.get('Event'), packet.get('Data')
         if event == 'ready':
             self.status.setText('Connected · ' + data['Gpu']['Name'] + ' · ' + data['Caps']['Profile'])
+            self.log.appendPlainText('Original engine ready · ' + data['Gpu']['Name'])
             self.preferences = data['Settings']
             for key, control in self.controls.items():
                 if isinstance(control, QCheckBox):
@@ -440,7 +444,8 @@ class EngineDialog(QDialog):
             self.status.setText('Nothing was compiled')
             return
         lines = [f'Compiled {progress.get("Done", 0)} of {progress["Total"]} pipelines; {progress.get("Failed", 0)} failed, '
-                 f'{progress.get("Skipped", 0)} skipped.']
+                 f'{progress.get("Skipped", 0)} skipped.',
+                 f'Cache data written during this compile (driver caches + vkd3d staging): {progress.get("CacheGrowthBytes", 0) / 1e6:.1f} MB.']
         if published:
             vkd3d = published.get('vkd3d')
             if vkd3d:

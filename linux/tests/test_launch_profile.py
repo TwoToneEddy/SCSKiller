@@ -60,6 +60,13 @@ class LaunchProfileTests(unittest.TestCase):
         self.assertEqual(env['__GL_SHADER_DISK_CACHE_PATH'], str(self.root / 'shadercache/12/nvidiav1'))
         self.assertTrue(all(c['ok'] for c in lp.verify_launch(profile, self.process)))
 
+    def test_mapped_archive_wins_over_working_directory(self):
+        # Witcher 3: sampled in bin/x64_dx12, but the mapped archive is bin/.
+        (self.install / 'bin/x64_dx12').mkdir(parents=True, exist_ok=True)
+        self.process['cwd'] = str(self.install / 'bin/x64_dx12')
+        self.process['maps'][1] = str(self.install / 'bin/vkd3d-proton.cache')
+        self.assertEqual(lp.routing(self.profile())['vkd3dArchive'], str(self.install / 'bin/vkd3d-proton.cache'))
+
     def test_explicit_vkd3d_directory_uses_executable_name(self):
         self.process['environment']['VKD3D_SHADER_CACHE_PATH'] = 'Z:\\cache\\dir'
         self.assertEqual(lp.routing(self.profile())['vkd3dArchive'], '/cache/dir/vkd3d-proton.game.exe.cache')
