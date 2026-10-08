@@ -32,6 +32,7 @@ public static unsafe class RootSig
         Ue55,   // 5.5-5.7: vertex shaders get UAVs
         Ue58,   // 5.8+: mesh/amplification shaders get UAVs; NVIDIA shader extensions get a u0 space 1001 table
         Red3,   // REDengine 3 (The Witcher 3, DX12): three fixed root signatures, see BuildRed3
+        Red3Buckets,   // REDengine 3 with a version 3 material cache: per-stage tables sized in steps, see BuildRed3Buckets
         Northlight, // Northlight (Control, DX12): one graphics and one compute root signature, see BuildNorthlight
         Dagor,  // Dagor Engine (DX12): built from each shader's header, constant buffers as root CBVs, see DagorRootSig
         DagorCbvRanges,   // the same with constant buffers in descriptor tables (War Thunder)
@@ -41,7 +42,7 @@ public static unsafe class RootSig
     /// version's stock rule, which the fork may have changed (FF7's did).</summary>
     public static Rule? RuleFor(EngineInfo e)
     {
-        if (e.Family == RedEngine.RedEngineReader.Family) return Rule.Red3;
+        if (e.Family == RedEngine.RedEngineReader.Family) return e.Fork == RedEngine.RedEngineReader.CacheV3Fork ? Rule.Red3Buckets : Rule.Red3;
         if (e.Family == Northlight.NorthlightReader.Family) return Rule.Northlight;
         if (e.Family == Dagor.DagorReader.Family) return e.Fork == Dagor.DagorReader.CbvRangesFork ? Rule.DagorCbvRanges : Rule.Dagor;
         if (e.Family != "Unreal" || !System.Version.TryParse(e.Version, out var v)) return null;
@@ -64,13 +65,13 @@ public static unsafe class RootSig
 
     /// <summary>The engine's rule is confirmed by a real game (<see cref="ConfirmedEngines"/>, per version and fork). Another
     /// fork (e.g. Stellar Blade's) may add slots no shader shows, so it stays unconfirmed.</summary>
-    public static bool Verified(EngineInfo e) => RuleFor(e) is { } r && (r == Rule.Red3 || ConfirmedEngines.Current.Contains(e)); // one REDengine 3 build: its recording confirmed it
+    public static bool Verified(EngineInfo e) => RuleFor(e) is { } r && (r is Rule.Red3 or Rule.Red3Buckets || ConfirmedEngines.Current.Contains(e)); // REDengine 3: each build's own capture confirmed it
 
     /// <summary>UE's six static samplers (space 1000, s0-s5): point/bilinear/trilinear x wrap/clamp, 52 bytes each.</summary>
     public static readonly byte[] Ue426Samplers = UeSamplers(0, 1000);
 
     /// <summary>The static samplers a rule's root signatures carry (4.25: the same six at s1000-s1005 in space 0; before: none).</summary>
-    public static byte[] StaticSamplers(Rule r) => r switch { Rule.Ue420 or Rule.Ue421 or Rule.Ue422 or Rule.Red3 or Rule.Northlight or Rule.Dagor or Rule.DagorCbvRanges => [], Rule.Ue425 => Ue425Samplers, _ => Ue426Samplers };
+    public static byte[] StaticSamplers(Rule r) => r switch { Rule.Ue420 or Rule.Ue421 or Rule.Ue422 or Rule.Red3 or Rule.Red3Buckets or Rule.Northlight or Rule.Dagor or Rule.DagorCbvRanges => [], Rule.Ue425 => Ue425Samplers, _ => Ue426Samplers };
 
     static readonly byte[] Ue425Samplers = UeSamplers(1000, 0);
 
@@ -106,7 +107,7 @@ public static unsafe class RootSig
     /// GRHISupportsMeshShadersTier0 on mesh-shader GPUs and so denies the mesh/amplification stages it doesn't use</param>
     /// <param name="maxSrvs">the game's MAX_SRVS when it isn't the rule's (<see cref="MaxSrvsFor"/>); 0 = the rule's</param>
     public static Desc Build(Rule r, IReadOnlyDictionary<Stage, ShaderInfo> stages, bool meshTier, uint maxSrvs = 0) =>
-        r switch { Rule.Ff7 => BuildUe(stages), Rule.Red3 => BuildRed3(stages), Rule.Northlight => BuildNorthlight(stages), Rule.Dagor => Dagor.DagorRootSig.Build(stages), Rule.DagorCbvRanges => Dagor.DagorRootSig.Build(stages, cbvRanges: true), _ => BuildStock(r, stages, meshTier, maxSrvs) };
+        r switch { Rule.Ff7 => BuildUe(stages), Rule.Red3 => BuildRed3(stages), Rule.Red3Buckets => BuildRed3Buckets(stages), Rule.Northlight => BuildNorthlight(stages), Rule.Dagor => Dagor.DagorRootSig.Build(stages), Rule.DagorCbvRanges => Dagor.DagorRootSig.Build(stages, cbvRanges: true), _ => BuildStock(r, stages, meshTier, maxSrvs) };
 
     /// <summary>The stage sets the recording confirmed <see cref="BuildRed3"/> on: VS, VS+PS, VS+HS+DS, VS+HS+DS+PS,
     /// VS+GS+PS, VS+GS+HS+DS, CS.</summary>
@@ -119,6 +120,46 @@ public static unsafe class RootSig
         new[] { Stage.Vertex }, [Stage.Vertex, Stage.Pixel], [Stage.Vertex, Stage.Hull, Stage.Domain], [Stage.Vertex, Stage.Hull, Stage.Domain, Stage.Pixel],
         [Stage.Vertex, Stage.Geometry, Stage.Pixel], [Stage.Vertex, Stage.Geometry, Stage.Hull, Stage.Domain], [Stage.Compute],
     }.Select(Mask).ToHashSet();
+
+    /// <summary>REDengine 3 with a version 3 material cache (Steam build 14504303 under Proton): one layout, its tables sized to
+    /// the pipeline's shaders. Graphics (flags 0x41: input layout, stream output): a CBV, SRV and sampler table for each of
+    /// PS, VS, GS, HS, DS in that order, then one UAV table for all stages. A stage's table holds its highest register + 1,
+    /// rounded up to the next step (CBV 4/8/14, SRV 4/8/16/32/128, sampler 4/8/16); an absent stage gets the largest step.
+    /// The UAV table takes the highest UAV of any stage (4/8/16). Compute (flags 0): CBV, SRV, sampler and UAV tables, sized
+    /// the same way. CBV, SRV and UAV ranges are data volatile and keep bounds checks (0x10002); SRV ranges sit at offset 0,
+    /// the others append. vkd3d-proton's dump of the game's root signatures: 744 of 744 of its own pipelines rebuild exactly.
+    /// Null when a shader uses another register space, an unbounded range, or more than the largest step.</summary>
+    static readonly uint[] CbvSteps = [4, 8, 14], SrvSteps = [4, 8, 16, 32, 128], SamplerSteps = [4, 8, 16], UavSteps = [4, 8, 16];
+
+    static Desc BuildRed3Buckets(IReadOnlyDictionary<Stage, ShaderInfo> stages)
+    {
+        if (stages.Values.SelectMany(s => s.Bindings).Any(b => b.Space != 0 || b.Count < 0))
+            throw new SerializeException("REDengine 3 tables hold space 0 bounded ranges only");
+        static uint Need(IEnumerable<ShaderInfo> shaders, string cls) =>
+            (uint)shaders.SelectMany(s => s.Bindings).Where(b => b.Class == cls).Select(b => b.Lower + b.Count).DefaultIfEmpty(0).Max();
+        static uint Step(uint need, uint[] steps) =>
+            steps.FirstOrDefault(s => need <= s) is var s and > 0 ? s : throw new SerializeException($"{need} registers exceed the largest REDengine 3 table");
+        const uint Volatile = 0x10002;
+        uint[] Table(uint vis, uint type, uint count) => type switch
+        {
+            0 => [0, vis, 0, count, 0, 0, Volatile, 0],   // SRVs at offset 0
+            3 => [0, vis, 3, count, 0, 0, 0],
+            _ => [0, vis, type, count, 0, 0, Volatile],
+        };
+        if (stages.TryGetValue(Stage.Compute, out var cs))
+            return new(0, [Table(0, 2, Step(Need([cs], "cbv"), CbvSteps)), Table(0, 0, Step(Need([cs], "srv"), SrvSteps)),
+                Table(0, 3, Step(Need([cs], "sampler"), SamplerSteps)), Table(0, 1, Step(Need([cs], "uav"), UavSteps))]);
+        var rows = new List<uint[]>();
+        foreach (var st in new[] { Stage.Pixel, Stage.Vertex, Stage.Geometry, Stage.Hull, Stage.Domain })
+        {
+            var used = stages.TryGetValue(st, out var sh) ? new[] { sh } : null;
+            rows.Add(Table(Vis(st), 2, used == null ? CbvSteps[^1] : Step(Need(used, "cbv"), CbvSteps)));
+            rows.Add(Table(Vis(st), 0, used == null ? SrvSteps[^1] : Step(Need(used, "srv"), SrvSteps)));
+            rows.Add(Table(Vis(st), 3, used == null ? SamplerSteps[^1] : Step(Need(used, "sampler"), SamplerSteps)));
+        }
+        rows.Add(Table(0, 1, Step(Need(stages.Values, "uav"), UavSteps)));
+        return new(0x41, rows);
+    }
 
     /// <summary>REDengine 3's root signatures depend on the pipeline's stages only: compute; VS (+ PS); and with a GS, HS or DS
     /// the same plus a CBV, SRV and two sampler tables for each of those three (and stream output allowed). All tables are
@@ -345,8 +386,12 @@ public static unsafe class RootSig
         return Dxbc.Part(blob, "RTS0"u8) is { IsEmpty: false } rts ? rts.ToArray() : throw new InvalidDataException("no RTS0 part");
     }
 
-    static readonly delegate* unmanaged<void*, nint*, nint*, int> SerializeFn = (delegate* unmanaged<void*, nint*, nint*, int>)NativeLibrary.GetExport(
-        NativeLibrary.Load(Path.Combine(Environment.SystemDirectory, "d3d12.dll")), "D3D12SerializeVersionedRootSignature"); // System32: never a proxy d3d12.dll next to the app
+    // Loaded on first serialize, so building descriptions needs no D3D12 runtime
+    static class Native
+    {
+        internal static readonly delegate* unmanaged<void*, nint*, nint*, int> SerializeFn = (delegate* unmanaged<void*, nint*, nint*, int>)NativeLibrary.GetExport(
+            NativeLibrary.Load(Path.Combine(Environment.SystemDirectory, "d3d12.dll")), "D3D12SerializeVersionedRootSignature"); // System32: never a proxy d3d12.dll next to the app
+    }
 
     /// <summary>The runtime refused the description (E_INVALIDARG: overlapping registers, a bad sampler, ...).</summary>
     public sealed class SerializeException(string message) : InvalidOperationException(message);
@@ -461,7 +506,7 @@ public static unsafe class RootSig
     static byte[] Call(byte* desc)
     {
         nint blob = 0, err = 0;
-        var hr = SerializeFn(desc, &blob, &err);
+        var hr = Native.SerializeFn(desc, &blob, &err);
         if (err != 0) Release(err);
         if (hr < 0) throw new SerializeException($"D3D12SerializeVersionedRootSignature failed 0x{hr:x8}");
         var vt = *(nint**)blob; // ID3DBlob: GetBufferPointer = slot 3, GetBufferSize = slot 4

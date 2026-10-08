@@ -239,7 +239,7 @@ sealed class PlanBuilder
     /// also when the recording has none (made on AMD, where the recorder captures no NVAPI state). NVIDIA only: AMD's
     /// runtime has no NVAPI state.</summary>
     internal static RtCollections.Nv? RasterNv(VendorCaps caps, RootSig.Rule rule, IReadOnlyCollection<Rec> recs, IEnumerable<Rec> nvRecs) =>
-        !caps.Profile.StartsWith("nvidia") ? null : LearnedRasterNv(recs, nvRecs) ?? (rule == RootSig.Rule.Red3 ? new RtCollections.Nv(12, 1, 0) : null);
+        !caps.Profile.StartsWith("nvidia") ? null : LearnedRasterNv(recs, nvRecs) ?? (rule is RootSig.Rule.Red3 or RootSig.Rule.Red3Buckets ? new RtCollections.Nv(12, 1, 0) : null);
 
     /// <summary>The recording's part of <see cref="RasterNv"/>: the slot and space at least 99% of the raster records' final
     /// states share (a record's last 'N' is what the warm applies), with their most common options; null otherwise.</summary>
@@ -293,7 +293,14 @@ sealed class PlanBuilder
         if (stages.Values.Select(h => bc[h].RootSignature).FirstOrDefault(r => r != null) is { } embedded) return embedded;
         if (rule == RootSig.Rule.Red3 && !RootSig.Red3Validated(stages.Keys.Select(k => (Stage)k))) return null; // not a stage set the rule was confirmed on
         if (!build) return rsByCounts.TryGetValue(Planner.CountsKey(Infos(stages)), out var learned) ? learned.FirstOrDefault(r => Covers(r, stages), learned[0]) : null;
-        var desc = RootSig.Build(rule, Infos(stages), MeshTier(stages), maxSrvs);
+        RootSig.Desc desc;
+        try { desc = RootSig.Build(rule, Infos(stages), MeshTier(stages), maxSrvs); }
+        catch (RootSig.SerializeException e)   // the rule has no root signature for these shaders: leave the stage set out
+        {
+            unserializable ??= e.Message;
+            Count("rs_unserializable");
+            return null;
+        }
         if (!rsCache.TryGetValue(desc.Key, out var h))
         {
             try
@@ -730,7 +737,7 @@ sealed class PlanBuilder
             log?.Report($"ray tracing: {libs.Count} DXIL libraries; the game's Windows device profile sets r.RayTracing.AllowPipeline=0: none synthesized");
             return;
         }
-        if (this.rule == RootSig.Rule.Red3) { Red3HitGroups(libs.Count); return; }
+        if (this.rule is RootSig.Rule.Red3 or RootSig.Rule.Red3Buckets) { Red3HitGroups(libs.Count); return; }
         if (engine.Family == FromSoft.FromSoftReader.Family) { SoulsHitGroups(libs.Count); return; }
         var learned = stateObjects.Select(RtCollections.Read).OfType<RtCollections.Recorded>().ToList();
         RtCollections.Rule rule;

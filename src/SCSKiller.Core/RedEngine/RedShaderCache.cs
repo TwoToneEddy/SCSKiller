@@ -34,7 +34,7 @@ public static class RedShaderCache
 
     public sealed record Materials(Dictionary<ulong, Entry> Shaders, List<ulong[]> Techniques);
 
-    public readonly record struct Footer(uint Shaders, uint Techniques, long At, long Size);
+    public readonly record struct Footer(uint Shaders, uint Techniques, long At, long Size, uint Version);
 
     /// <summary>The material cache's footer, when its counts and offsets fit the file and the caps and the techniques are
     /// followed by exactly the two short lists version 5 writes before the footer (u32 n1, u32 n2, (n1 + n2) x 12 bytes:
@@ -55,11 +55,11 @@ public static class RedShaderCache
         // Version 3 has the same shader and technique records, with no lists
         // between the techniques and footer. Require the exact boundary.
         if (version == 3) return at + size == (ulong)len - 48
-            ? new Footer(shaders, techniques, (long)at, (long)size) : null;
+            ? new Footer(shaders, techniques, (long)at, (long)size, 3) : null;
         var lists = new byte[8];
         f.Position = (long)(at + size);
         f.ReadExactly(lists);
-        return (long)(at + size) + 8 + 12L * ((long)U32(lists, 0) + U32(lists, 4)) == len - 48 ? new Footer(shaders, techniques, (long)at, (long)size) : null;
+        return (long)(at + size) + 8 + 12L * ((long)U32(lists, 0) + U32(lists, 4)) == len - 48 ? new Footer(shaders, techniques, (long)at, (long)size, 5) : null;
     }
 
     /// <summary>Null: not such a file, another version, or damaged.</summary>

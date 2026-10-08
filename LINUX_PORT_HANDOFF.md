@@ -12,10 +12,11 @@ The user requested this branch and commit as a resumable checkpoint. The old san
 
 ## NEXT STEP (start here)
 
-The GUI precompile → normal Steam launch workflow passed on 2026-10-08 ([note](linux/validation/2026-10-08-witcher3-normal-launch.md)): all three cache-routing checks were OK, and Steam Launch Options are empty. Entry reuse was measured: **0** of the game's 657 own pipelines and 0 of 28 new ones appear in the 42,350 generated entries.
+GUI precompile → normal Steam launch passed on 2026-10-08 ([note](linux/validation/2026-10-08-witcher3-normal-launch.md)). Root signatures now match the game ([note](linux/validation/2026-10-08-witcher3-root-signatures.md)): `RootSig.Rule.Red3Buckets` gives the first real vkd3d-proton hits (30 compute pipelines). Measure with `linux/vkd3d-compare.py`.
 
-1. **Make generated pipelines match the game (the real blocker to any benefit).** Investigate the synthesized root signatures and PSO templates (`Planning/Planner.cs`, `Planning/RootSig.cs`), using the game's own entries in `bin/vkd3d-proton.cache` (hashes not in the generated set) or a recording as ground truth. Re-measure overlap after each change: count `.cache.write` entries already in `.cache` after a short session.
-2. Only then compare stutter/frame times on a workload that has baseline compilation stalls.
+1. **Graphics pipeline state.** 654 of the game's 743 graphics entries already share shaders and root signature with a generated pipeline; only the state hash differs. Reverse-engineering the state from Steam's Fossilize cache failed (see note). Record the game's exact D3D12 pipeline descriptions with the project's recorder (Game shaders → Install recorder, play, remove), then plan from the recording and re-measure.
+2. Recompile through the GUI so the game's caches get the new root signatures, play, and confirm the compute hits in the game's own `.cache.write`.
+3. Only then compare stutter/frame times.
 
 ## What was actually verified
 

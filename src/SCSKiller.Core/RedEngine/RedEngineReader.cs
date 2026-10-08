@@ -14,10 +14,11 @@ namespace SCSKiller.Core.RedEngine;
 /// carry no root signature: the engine has three, one per kind of pipeline (<see cref="RootSig.Rule.Red3"/>).
 /// A material cache that doesn't read whole, or whose first techniques name no usable pipeline, isn't detected: the next
 /// reader (the carver) gets the game, under its own engine, so the REDengine 3 root signatures never apply to it.
-/// EngineInfo: Family "REDengine 3", Version "DX12".</summary>
+/// EngineInfo: Family "REDengine 3", Version "DX12"; Fork <see cref="CacheV3Fork"/> with a version 3 material cache, whose
+/// build sizes its root signatures to the shaders instead (<see cref="RootSig.Rule.Red3Buckets"/>).</summary>
 public sealed class RedEngineReader : IEngineReader
 {
-    public const string Family = "REDengine 3", Version = "DX12";
+    public const string Family = "REDengine 3", Version = "DX12", CacheV3Fork = "cache-v3";
 
     /// <summary>The library name of a technique's ray tracing hit group map: its closest hit library, then its any hit library
     /// when it has one (<see cref="RedRayTracing"/>).</summary>
@@ -44,6 +45,7 @@ public sealed class RedEngineReader : IEngineReader
         var path = MaterialPath(game);
         if (!File.Exists(path)) return null;
         using var f = Open(path);
+        var fork = RedShaderCache.ReadFooter(f) is { Version: 3 } ? CacheV3Fork : null;
         if (RedShaderCache.ReadMaterials(f) is not { } m) return null;
         var shaOf = new Dictionary<ulong, string>();
         var shaders = new Dictionary<string, ShaderInfo>();
@@ -56,7 +58,7 @@ public sealed class RedEngineReader : IEngineReader
                     try { if (ShaderContainer.Parse(c, sha, new(0, 0, 0, 0)) is { } info) shaders[sha] = info; }
                     catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException) { }
                 }
-            if (Graphics(t, shaOf, shaders) != null) return new EngineInfo(Family, Version, null, "D3D12", false, null);
+            if (Graphics(t, shaOf, shaders) != null) return new EngineInfo(Family, Version, fork, "D3D12", false, null);
         }
         return null;
     }

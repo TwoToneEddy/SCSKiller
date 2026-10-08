@@ -33,6 +33,15 @@ public class RedShaderCacheFormatTests
     }
 
     [Theory]
+    [InlineData(3u, false)]
+    [InlineData(5u, true)]
+    public void FooterReportsVersion(uint version, bool lists)
+    {
+        using var stream = new MemoryStream(Material(version, lists));
+        Assert.Equal(version, RedShaderCache.ReadFooter(stream)!.Value.Version);
+    }
+
+    [Theory]
     [InlineData(3u, true)]
     [InlineData(5u, false)]
     [InlineData(4u, false)]
